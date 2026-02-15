@@ -1,0 +1,5 @@
+# Claude Code session logs
+session.*.log
+
+# Claude project config
+.claude/
