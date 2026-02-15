@@ -3,6 +3,7 @@ pgrx::pg_module_magic!();
 mod bootstrap;
 mod functions;
 mod identity;
+mod parser;
 mod schema;
 mod workers;
 
@@ -218,11 +219,178 @@ mod tests {
     }
 
     #[pg_test]
-    fn test_stub_parse_crate() {
-        let result = Spi::get_one::<String>("SELECT kerai.parse_crate('/tmp/test')")
-            .unwrap()
-            .unwrap();
-        assert!(result.starts_with("STUB:"));
+    fn test_parse_source_simple_fn() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.parse_source('fn hello() { let x = 1; }', 'test_simple.rs')",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        let node_count = obj["nodes"].as_u64().unwrap();
+        assert!(node_count > 0, "Should have parsed nodes");
+
+        // Verify function node exists
+        let fn_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'fn' AND content = 'hello'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(fn_count, 1, "Should have one fn node named 'hello'");
+    }
+
+    #[pg_test]
+    fn test_parse_source_struct_with_fields() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.parse_source('struct Point { x: f64, y: f64 }', 'test_struct.rs')",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj["nodes"].as_u64().unwrap() > 0);
+
+        let field_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'field' AND content IN ('x', 'y')",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(field_count, 2, "Should have two field nodes");
+    }
+
+    #[pg_test]
+    fn test_parse_source_impl_block() {
+        let source = "struct Foo;
+impl Foo {
+    fn bar(&self) -> i32 { 42 }
+}";
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.parse_source('{}', 'test_impl.rs')",
+            source.replace('\'', "''")
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj["nodes"].as_u64().unwrap() > 0);
+
+        let impl_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'impl'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(impl_count >= 1, "Should have at least one impl node");
+
+        let method_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'fn' AND content = 'bar'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(method_count, 1, "Should have method 'bar'");
+    }
+
+    #[pg_test]
+    fn test_parse_source_returns_json_stats() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.parse_source('fn f() {}', 'test_stats.rs')",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj.contains_key("file"));
+        assert!(obj.contains_key("nodes"));
+        assert!(obj.contains_key("edges"));
+        assert!(obj.contains_key("elapsed_ms"));
+    }
+
+    #[pg_test]
+    fn test_parse_source_preserves_doc_comments() {
+        let source = "/// This is a doc comment\nfn documented() {}";
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.parse_source('{}', 'test_doc.rs')",
+            source.replace('\'', "''")
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj["nodes"].as_u64().unwrap() > 0);
+
+        let doc_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'doc_comment'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(doc_count >= 1, "Should have at least one doc_comment node");
+    }
+
+    #[pg_test]
+    fn test_parse_source_macro_call() {
+        let source = "fn main() { println!(\"hello\"); }";
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.parse_source('{}', 'test_macro.rs')",
+            source.replace('\'', "''")
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj["nodes"].as_u64().unwrap() > 0);
+
+        let macro_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'macro_call'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(macro_count >= 1, "Should have at least one macro_call node");
+    }
+
+    #[pg_test]
+    fn test_parse_source_expressions() {
+        let source = "fn f() { if true { 1 } else { 2 }; match 1 { 0 => 0, _ => 1 }; }";
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.parse_source('{}', 'test_expr.rs')",
+            source.replace('\'', "''")
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj["nodes"].as_u64().unwrap() > 0);
+
+        let if_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'expr_if'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(if_count >= 1, "Should have at least one expr_if node");
+
+        let match_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'expr_match'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(match_count >= 1, "Should have at least one expr_match node");
+    }
+
+    #[pg_test]
+    fn test_parse_source_idempotent() {
+        Spi::run(
+            "SELECT kerai.parse_source('fn dup() {}', 'test_idempotent.rs')",
+        )
+        .unwrap();
+        let count1 = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'fn' AND content = 'dup'",
+        )
+        .unwrap()
+        .unwrap();
+
+        // Parse again — should delete and re-insert
+        Spi::run(
+            "SELECT kerai.parse_source('fn dup() {}', 'test_idempotent.rs')",
+        )
+        .unwrap();
+        let count2 = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'fn' AND content = 'dup'",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(count1, count2, "Idempotent parse should not duplicate nodes");
     }
 
     #[pg_test]

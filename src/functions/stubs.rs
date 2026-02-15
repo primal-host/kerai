@@ -1,24 +1,6 @@
 use pgrx::prelude::*;
 
-// Plan 02: Parsing
-#[pg_extern]
-fn parse_crate(path: &str) -> String {
-    format!("STUB: parse_crate('{}') — implemented in Plan 02", path)
-}
-
-#[pg_extern]
-fn parse_file(path: &str) -> String {
-    format!("STUB: parse_file('{}') — implemented in Plan 02", path)
-}
-
-#[pg_extern]
-fn parse_source(language: &str, source: &str) -> String {
-    format!(
-        "STUB: parse_source('{}', '{}...') — implemented in Plan 02",
-        language,
-        &source[..source.len().min(40)]
-    )
-}
+// Plan 02: Parsing — moved to src/parser/mod.rs
 
 // Plan 03: Reconstruction
 #[pg_extern]
