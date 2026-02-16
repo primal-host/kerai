@@ -20,6 +20,8 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 │  ├─ 07 Code Queries ←─────── 05               │
 │  │   └─ 08 AI Perspectives ← 01 + 04 + 07 ───┘
 │  └─ 11 External Economy ←── 05 + 10
+│
+│  12 Knowledge Editor ←──── 01 + 02 + 04 + 06 + 08
 ```
 
 | Plan | Title | Depends On | Delivers |
@@ -35,6 +37,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 | [09](09-agent-swarms.md) | Agent Swarms | 04, 06, 08 | Massive concurrent agents, autonomous pricing, market participation |
 | [10](10-zk-marketplace.md) | ZK Marketplace | 06, 08 | Zero-knowledge proofs, Dutch auctions, simultaneous release, open-source floor |
 | [11](11-external-economy.md) | External Economy | 05, 10 | Wallets, token bridge, exchange listing, bounties, fiat on/off ramps |
+| [12](12-kerai-web.md) | Knowledge Editor | 01, 02, 04, 06, 08 | Web-based editor, document parsers, AI-assisted writing, corpus ingestion, real-time collaboration |
 
 ## Design Principles
 
@@ -64,6 +67,8 @@ Code as structured data (nodes, edges)
               → All knowledge eventually becomes open (open-source at floor)
                 → External participation: humans and AIs hold, trade, and speculate
                   → Compute cost parity: credit price converges to cost of knowledge production
+                    → Knowledge editor: humans write with AI-assisted structural awareness
+                      → New knowledge compounds: connections surface connections
 ```
 
 Each step follows from the previous. The same schema, same CRDT sync, same cryptographic identity carries through the entire chain. The final step — external participation — is not a bolt-on but a natural consequence: if credits have real utility, external actors will want them. Plan 11 channels that inevitability into something coherent rather than letting a shadow economy form.
@@ -71,7 +76,8 @@ Each step follows from the previous. The same schema, same CRDT sync, same crypt
 ## Key References
 
 - [Design conversation](../conversation-kerai-design.md)
-- [Naming origin](../musings.md)
+- [Naming origin](../musings/musings-1.md)
+- [Knowledge editor exploration](../musings/musings-2.md)
 - [Gritzko's gist](https://gist.github.com/gritzko/6e81b5391eacb585ae207f5e634db07e)
 - [HN discussion](https://news.ycombinator.com/item?id=47022238)
 - [Kleppmann — "A highly-available move operation for replicated trees"](https://martin.kleppmann.com/papers/move-op.pdf) (CRDT tree operations)
