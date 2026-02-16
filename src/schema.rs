@@ -535,3 +535,58 @@ CREATE TABLE kerai.version_vector (
     name = "table_version_vector",
     requires = ["schema_bootstrap"]
 );
+
+// Table: reward_schedule — configurable emission rates per work type
+extension_sql!(
+    r#"
+CREATE TABLE kerai.reward_schedule (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    work_type   TEXT NOT NULL UNIQUE,
+    reward      BIGINT NOT NULL CHECK (reward > 0),
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"#,
+    name = "table_reward_schedule",
+    requires = ["schema_bootstrap"]
+);
+
+// Table: reward_log — audit trail for auto-mints
+extension_sql!(
+    r#"
+CREATE TABLE kerai.reward_log (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    work_type   TEXT NOT NULL,
+    reward      BIGINT NOT NULL,
+    wallet_id   UUID NOT NULL REFERENCES kerai.wallets(id),
+    details     JSONB DEFAULT '{}'::jsonb,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"#,
+    name = "table_reward_log",
+    requires = ["table_wallets"]
+);
+
+// Seed data: default reward schedule
+extension_sql!(
+    r#"
+INSERT INTO kerai.reward_schedule (work_type, reward) VALUES
+    ('parse_file', 10),
+    ('parse_crate', 50),
+    ('parse_markdown', 10),
+    ('create_version', 5),
+    ('bounty_settlement', 20),
+    ('peer_sync', 15);
+"#,
+    name = "seed_reward_schedule",
+    requires = ["table_reward_schedule"]
+);
+
+// Alter wallets: add nonce column for replay protection
+extension_sql!(
+    r#"
+ALTER TABLE kerai.wallets ADD COLUMN nonce BIGINT NOT NULL DEFAULT 0;
+"#,
+    name = "alter_wallets_nonce",
+    requires = ["table_wallets"]
+);
