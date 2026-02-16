@@ -1042,6 +1042,178 @@ impl Config {
         let pk = first["public_key"].as_str().unwrap();
         assert_eq!(pk.len(), 64, "public_key should be 64 hex chars");
     }
+
+    // --- Plan 07: Query / Navigation tests ---
+
+    #[pg_test]
+    fn test_find_by_content_pattern() {
+        Spi::run("SELECT kerai.parse_source('fn hello_world() {} fn hello_there() {} fn goodbye() {}', 'find_pattern.rs')").unwrap();
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.find('%hello%', NULL, NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        let fn_matches: Vec<_> = arr.iter().filter(|v| v["kind"].as_str() == Some("fn")).collect();
+        assert!(fn_matches.len() >= 2, "Should find at least 2 fn nodes matching '%hello%', got {}", fn_matches.len());
+    }
+
+    #[pg_test]
+    fn test_find_with_kind_filter() {
+        Spi::run("SELECT kerai.parse_source('struct Hello; fn Hello() {}', 'find_kind.rs')").unwrap();
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.find('Hello', 'struct', NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(!arr.is_empty(), "Should find at least one struct named Hello");
+        for item in arr {
+            assert_eq!(item["kind"].as_str().unwrap(), "struct", "All results should be struct kind");
+        }
+    }
+
+    #[pg_test]
+    fn test_find_with_limit() {
+        Spi::run("SELECT kerai.parse_source('fn aaa() {} fn aab() {} fn aac() {}', 'find_limit.rs')").unwrap();
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.find('a%', NULL, 1)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(arr.len() <= 1, "Limit=1 should return at most 1 result, got {}", arr.len());
+    }
+
+    #[pg_test]
+    fn test_find_no_matches() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.find('zzz_nonexistent_xyz_%', NULL, NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(arr.is_empty(), "Nonexistent pattern should return empty array");
+    }
+
+    #[pg_test]
+    fn test_refs_finds_definitions_and_impls() {
+        let source = "struct Config {} impl Config { fn new() -> Self { Config {} } }";
+        Spi::run(&format!(
+            "SELECT kerai.parse_source('{}', 'refs_test.rs')",
+            source.replace('\'', "''"),
+        ))
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.refs('Config')",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert_eq!(obj["symbol"].as_str().unwrap(), "Config");
+
+        let defs = obj["definitions"].as_array().unwrap();
+        assert!(!defs.is_empty(), "Should find at least 1 definition of Config");
+
+        let impls = obj["impls"].as_array().unwrap();
+        assert!(!impls.is_empty(), "Should find at least 1 impl of Config");
+    }
+
+    #[pg_test]
+    fn test_refs_nonexistent_symbol() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.refs('zzz_nonexistent_symbol_xyz')",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj["definitions"].as_array().unwrap().is_empty());
+        assert!(obj["references"].as_array().unwrap().is_empty());
+        assert!(obj["impls"].as_array().unwrap().is_empty());
+    }
+
+    #[pg_test]
+    fn test_tree_top_level() {
+        Spi::run("SELECT kerai.parse_source('fn top_fn() {}', 'tree_top.rs')").unwrap();
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.tree(NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        let file_nodes: Vec<_> = arr.iter().filter(|v| v["kind"].as_str() == Some("file")).collect();
+        assert!(!file_nodes.is_empty(), "Top-level tree should include file nodes");
+    }
+
+    #[pg_test]
+    fn test_tree_with_path() {
+        Spi::run("SELECT kerai.parse_source('fn nested() {}', 'tree_path.rs')").unwrap();
+        // Get the file node's path
+        let file_path = Spi::get_one::<String>(
+            "SELECT path::text FROM kerai.nodes WHERE kind = 'file' AND content = 'tree_path.rs'",
+        )
+        .unwrap()
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.tree('{}')",
+            sql_escape(&file_path),
+        ))
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(!arr.is_empty(), "Tree with file path should find descendants");
+    }
+
+    #[pg_test]
+    fn test_children_of_file_node() {
+        Spi::run("SELECT kerai.parse_source('fn child_a() {} fn child_b() {}', 'children_test.rs')").unwrap();
+        let file_id = Spi::get_one::<pgrx::Uuid>(
+            "SELECT id FROM kerai.nodes WHERE kind = 'file' AND content = 'children_test.rs'",
+        )
+        .unwrap()
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.children('{}'::uuid)",
+            file_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        let fn_children: Vec<_> = arr.iter().filter(|v| v["kind"].as_str() == Some("fn")).collect();
+        assert!(fn_children.len() >= 2, "File node should have at least 2 fn children, got {}", fn_children.len());
+    }
+
+    #[pg_test]
+    fn test_ancestors_of_nested_node() {
+        Spi::run("SELECT kerai.parse_source('fn outer() { let x = 1; }', 'ancestors_test.rs')").unwrap();
+        // Find a stmt_local node (the `let x = 1;`)
+        let local_id = Spi::get_one::<pgrx::Uuid>(
+            "SELECT id FROM kerai.nodes WHERE kind = 'stmt_local' AND content = 'x' LIMIT 1",
+        )
+        .unwrap();
+
+        if let Some(nid) = local_id {
+            let result = Spi::get_one::<pgrx::JsonB>(&format!(
+                "SELECT kerai.ancestors('{}'::uuid)",
+                nid,
+            ))
+            .unwrap()
+            .unwrap();
+            let arr = result.0.as_array().unwrap();
+            assert!(!arr.is_empty(), "Nested node should have ancestors");
+            // Should eventually reach a file node
+            let has_file = arr.iter().any(|v| v["kind"].as_str() == Some("file"));
+            assert!(has_file, "Ancestors should include the file node");
+        }
+    }
+
+    /// sql_escape helper for tests
+    fn sql_escape(s: &str) -> String {
+        s.replace('\'', "''")
+    }
 }
 
 #[cfg(test)]
