@@ -4,6 +4,21 @@ import { WsClient } from './ws'
 import { initSidebar } from './sidebar'
 import * as api from './api'
 
+// Theme
+const themeBtn = document.getElementById('btn-theme')!;
+function applyTheme(dark: boolean): void {
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  themeBtn.textContent = dark ? 'Light' : 'Dark';
+  localStorage.setItem('kerai-theme', dark ? 'dark' : 'light');
+}
+const savedTheme = localStorage.getItem('kerai-theme');
+const prefersDark = savedTheme ? savedTheme === 'dark' : window.matchMedia('(prefers-color-scheme: dark)').matches;
+applyTheme(prefersDark);
+themeBtn.addEventListener('click', () => {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  applyTheme(!isDark);
+});
+
 // State
 let currentDocId: string | null = null;
 let saveTimer: number | null = null;

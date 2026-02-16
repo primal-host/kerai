@@ -4,10 +4,54 @@
   box-sizing: border-box;
 }
 
+:root {
+  --bg: #f5f5f5;
+  --fg: #1a1a1a;
+  --surface: #fff;
+  --surface-alt: #fafafa;
+  --border: #ddd;
+  --border-light: #e0e0e0;
+  --muted: #666;
+  --muted-light: #888;
+  --muted-lighter: #999;
+  --accent: #1a73e8;
+  --accent-hover: #f0f6ff;
+  --btn-hover: #e8e8e8;
+  --code-bg: #f0f0f0;
+  --pre-bg: #1e1e1e;
+  --pre-fg: #d4d4d4;
+  --table-head: #f0f0f0;
+  --hr: #eee;
+  --quote-fg: #555;
+  --quote-border: #ddd;
+}
+
+[data-theme="dark"] {
+  --bg: #1a1a1a;
+  --fg: #d4d4d4;
+  --surface: #252525;
+  --surface-alt: #202020;
+  --border: #3a3a3a;
+  --border-light: #333;
+  --muted: #999;
+  --muted-light: #777;
+  --muted-lighter: #666;
+  --accent: #5b9cf6;
+  --accent-hover: #2a3548;
+  --btn-hover: #383838;
+  --code-bg: #333;
+  --pre-bg: #1e1e1e;
+  --pre-fg: #d4d4d4;
+  --table-head: #2e2e2e;
+  --hr: #3a3a3a;
+  --quote-fg: #999;
+  --quote-border: #444;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  color: #1a1a1a;
-  background: #f5f5f5;
+  color: var(--fg);
+  background: var(--bg);
 }
 
 #app {
@@ -21,8 +65,8 @@ body {
   align-items: center;
   gap: 12px;
   padding: 8px 16px;
-  background: #fff;
-  border-bottom: 1px solid #ddd;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 
@@ -34,37 +78,42 @@ body {
 
 #toolbar button {
   padding: 4px 10px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--fg);
   cursor: pointer;
   font-size: 13px;
   font-weight: 600;
 }
 
 #toolbar button:hover {
-  background: #e8e8e8;
+  background: var(--btn-hover);
 }
 
 #toolbar button.active {
-  background: #1a73e8;
+  background: var(--accent);
   color: #fff;
-  border-color: #1a73e8;
+  border-color: var(--accent);
 }
 
 #toolbar select {
   padding: 4px 8px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 13px;
+  background: var(--surface);
+  color: var(--fg);
 }
 
 #search-input {
   padding: 4px 8px;
-  border: 1px solid #ccc;
+  border: 1px solid var(--border);
   border-radius: 4px;
   font-size: 13px;
   width: 200px;
+  background: var(--surface);
+  color: var(--fg);
 }
 
 #main {
@@ -77,7 +126,7 @@ body {
   flex: 1;
   padding: 32px 48px;
   overflow-y: auto;
-  background: #fff;
+  background: var(--surface);
   max-width: 800px;
   margin: 0 auto;
 }
@@ -112,15 +161,15 @@ body {
 }
 
 .tiptap blockquote {
-  border-left: 3px solid #ddd;
+  border-left: 3px solid var(--quote-border);
   padding-left: 16px;
   margin: 0.8em 0;
-  color: #555;
+  color: var(--quote-fg);
 }
 
 .tiptap pre {
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: var(--pre-bg);
+  color: var(--pre-fg);
   padding: 16px;
   border-radius: 6px;
   overflow-x: auto;
@@ -139,7 +188,7 @@ body {
 }
 
 .tiptap a {
-  color: #1a73e8;
+  color: var(--accent);
   text-decoration: none;
 }
 
@@ -154,18 +203,18 @@ body {
 }
 
 .tiptap th, .tiptap td {
-  border: 1px solid #ddd;
+  border: 1px solid var(--border);
   padding: 8px 12px;
   text-align: left;
 }
 
 .tiptap th {
-  background: #f0f0f0;
+  background: var(--table-head);
   font-weight: 600;
 }
 
 .tiptap code {
-  background: #f0f0f0;
+  background: var(--code-bg);
   padding: 2px 4px;
   border-radius: 3px;
   font-size: 0.9em;
@@ -179,7 +228,7 @@ body {
 
 .tiptap hr {
   border: none;
-  border-top: 2px solid #eee;
+  border-top: 2px solid var(--hr);
   margin: 1.5em 0;
 }
 
@@ -187,15 +236,15 @@ body {
 #sidebar {
   width: 280px;
   padding: 16px;
-  background: #fafafa;
-  border-left: 1px solid #ddd;
+  background: var(--surface-alt);
+  border-left: 1px solid var(--border);
   overflow-y: auto;
   flex-shrink: 0;
 }
 
 #sidebar h3 {
   font-size: 14px;
-  color: #666;
+  color: var(--muted);
   margin-bottom: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
@@ -204,21 +253,21 @@ body {
 .suggestion-item {
   padding: 8px 12px;
   margin-bottom: 8px;
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--border-light);
   border-radius: 6px;
   cursor: pointer;
   font-size: 13px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .suggestion-item:hover {
-  border-color: #1a73e8;
-  background: #f0f6ff;
+  border-color: var(--accent);
+  background: var(--accent-hover);
 }
 
 .suggestion-item .kind {
   font-size: 11px;
-  color: #888;
+  color: var(--muted-light);
   text-transform: uppercase;
 }
 
@@ -229,6 +278,14 @@ body {
 
 .suggestion-item .path {
   font-size: 11px;
-  color: #999;
+  color: var(--muted-lighter);
   margin-top: 2px;
+}
+
+/* Theme toggle */
+#btn-theme {
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 8px;
 }
