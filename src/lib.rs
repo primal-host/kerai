@@ -1,6 +1,7 @@
 pgrx::pg_module_magic!();
 
 mod bootstrap;
+mod crdt;
 mod functions;
 mod identity;
 mod parser;
@@ -402,14 +403,6 @@ impl Foo {
         assert!(result.starts_with("STUB:"));
     }
 
-    #[pg_test]
-    fn test_stub_version_vector() {
-        let result = Spi::get_one::<String>("SELECT kerai.version_vector()")
-            .unwrap()
-            .unwrap();
-        assert!(result.starts_with("STUB:"));
-    }
-
     // --- Plan 03: Reconstruction tests ---
 
     /// Helper: format source through prettyplease for canonical comparison.
@@ -553,6 +546,351 @@ impl Config {
     }
 }";
         assert_roundtrip(source, "recon_complex.rs");
+    }
+
+    // --- Plan 04: CRDT operation tests ---
+
+    #[pg_test]
+    fn test_crdt_insert_node_via_apply_op() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"crdt_test_fn\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert_eq!(obj["op_type"].as_str().unwrap(), "insert_node");
+        assert!(obj.contains_key("node_id"));
+        assert!(obj.contains_key("lamport_ts"));
+        assert!(obj.contains_key("author_seq"));
+
+        // Verify node exists
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'fn' AND content = 'crdt_test_fn'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(count, 1, "Node should exist after insert_node op");
+    }
+
+    #[pg_test]
+    fn test_crdt_update_content() {
+        // Insert a node first
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"old_name\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let node_id = result.0["node_id"].as_str().unwrap().to_string();
+
+        // Update content
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('update_content', '{}'::uuid, '{{\"new_content\": \"new_name\"}}'::jsonb)",
+            node_id,
+        ))
+        .unwrap();
+
+        let content = Spi::get_one::<String>(&format!(
+            "SELECT content FROM kerai.nodes WHERE id = '{}'::uuid",
+            node_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(content, "new_name");
+    }
+
+    #[pg_test]
+    fn test_crdt_update_metadata() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"meta_fn\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let node_id = result.0["node_id"].as_str().unwrap().to_string();
+
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('update_metadata', '{}'::uuid, '{{\"merge\": {{\"visibility\": \"public\"}}}}'::jsonb)",
+            node_id,
+        ))
+        .unwrap();
+
+        let meta = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT metadata FROM kerai.nodes WHERE id = '{}'::uuid",
+            node_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(meta.0["visibility"].as_str().unwrap(), "public");
+    }
+
+    #[pg_test]
+    fn test_crdt_move_node() {
+        // Create parent
+        let p = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"module\", \"content\": \"parent_mod\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let parent_id = p.0["node_id"].as_str().unwrap().to_string();
+
+        // Create child
+        let c = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"child_fn\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let child_id = c.0["node_id"].as_str().unwrap().to_string();
+
+        // Move child under parent at position 5
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('move_node', '{}'::uuid, '{{\"new_parent_id\": \"{}\", \"new_position\": 5}}'::jsonb)",
+            child_id, parent_id,
+        ))
+        .unwrap();
+
+        let (pid, pos) = Spi::get_two::<String, i32>(&format!(
+            "SELECT parent_id::text, position FROM kerai.nodes WHERE id = '{}'::uuid",
+            child_id,
+        ))
+        .unwrap();
+        assert_eq!(pid.unwrap(), parent_id);
+        assert_eq!(pos.unwrap(), 5);
+    }
+
+    #[pg_test]
+    fn test_crdt_delete_node() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"doomed_fn\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let node_id = result.0["node_id"].as_str().unwrap().to_string();
+
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('delete_node', '{}'::uuid, '{{\"cascade\": false}}'::jsonb)",
+            node_id,
+        ))
+        .unwrap();
+
+        let count = Spi::get_one::<i64>(&format!(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE id = '{}'::uuid",
+            node_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(count, 0, "Node should be deleted");
+    }
+
+    #[pg_test]
+    fn test_crdt_delete_node_cascade() {
+        // Create parent
+        let p = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"module\", \"content\": \"cascade_parent\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let parent_id = p.0["node_id"].as_str().unwrap().to_string();
+
+        // Create child with parent_id
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('insert_node', NULL, '{{\"kind\": \"fn\", \"content\": \"cascade_child\", \"position\": 0, \"parent_id\": \"{}\"}}'::jsonb)",
+            parent_id,
+        ))
+        .unwrap();
+
+        // Cascade delete parent
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('delete_node', '{}'::uuid, '{{\"cascade\": true}}'::jsonb)",
+            parent_id,
+        ))
+        .unwrap();
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE content IN ('cascade_parent', 'cascade_child')",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(count, 0, "Parent and child should both be deleted");
+    }
+
+    #[pg_test]
+    fn test_crdt_version_vector_increments() {
+        // Two ops should produce author_seq >= 2
+        Spi::run(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"vv1\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap();
+        Spi::run(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"vv2\", \"position\": 1}'::jsonb)",
+        )
+        .unwrap();
+
+        let vv = Spi::get_one::<pgrx::JsonB>("SELECT kerai.version_vector()")
+            .unwrap()
+            .unwrap();
+        let obj = vv.0.as_object().unwrap();
+        // There should be at least one author with seq >= 2
+        let max_seq = obj.values().filter_map(|v| v.as_i64()).max().unwrap_or(0);
+        assert!(max_seq >= 2, "Version vector should show seq >= 2 after two ops");
+    }
+
+    #[pg_test]
+    fn test_crdt_lamport_clock_increments() {
+        let before = Spi::get_one::<i64>("SELECT kerai.lamport_clock()")
+            .unwrap()
+            .unwrap();
+
+        Spi::run(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"lc_fn\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap();
+
+        let after = Spi::get_one::<i64>("SELECT kerai.lamport_clock()")
+            .unwrap()
+            .unwrap();
+        assert!(after > before, "Lamport clock should increase after an op");
+    }
+
+    #[pg_test]
+    #[should_panic(expected = "duplicate key value violates unique constraint")]
+    fn test_crdt_idempotent_replay() {
+        // Get current author fingerprint
+        let fp = Spi::get_one::<String>(
+            "SELECT key_fingerprint FROM kerai.instances WHERE is_self = true",
+        )
+        .unwrap()
+        .unwrap();
+
+        // Apply an op
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"replay_fn\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let seq = result.0["author_seq"].as_i64().unwrap();
+        let ts = result.0["lamport_ts"].as_i64().unwrap();
+
+        // Manually try to insert a duplicate (author, author_seq) — should fail
+        Spi::run(&format!(
+            "INSERT INTO kerai.operations (instance_id, op_type, author, lamport_ts, author_seq, payload)
+             SELECT id, 'insert_node', '{}', {}, {}, '{{}}'::jsonb FROM kerai.instances WHERE is_self = true",
+            fp.replace('\'', "''"),
+            ts + 1,
+            seq,
+        ))
+        .unwrap();
+    }
+
+    #[pg_test]
+    fn test_crdt_insert_and_delete_edge() {
+        // Create two nodes
+        let n1 = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"edge_src\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let src_id = n1.0["node_id"].as_str().unwrap().to_string();
+
+        let n2 = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"edge_tgt\", \"position\": 1}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let tgt_id = n2.0["node_id"].as_str().unwrap().to_string();
+
+        // Insert edge
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('insert_edge', '{}'::uuid, '{{\"target_id\": \"{}\", \"relation\": \"calls\"}}'::jsonb)",
+            src_id, tgt_id,
+        ))
+        .unwrap();
+
+        let edge_count = Spi::get_one::<i64>(&format!(
+            "SELECT count(*)::bigint FROM kerai.edges WHERE source_id = '{}'::uuid AND target_id = '{}'::uuid AND relation = 'calls'",
+            src_id, tgt_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(edge_count, 1, "Edge should exist");
+
+        // Delete edge
+        Spi::run(&format!(
+            "SELECT kerai.apply_op('delete_edge', '{}'::uuid, '{{\"target_id\": \"{}\", \"relation\": \"calls\"}}'::jsonb)",
+            src_id, tgt_id,
+        ))
+        .unwrap();
+
+        let edge_count2 = Spi::get_one::<i64>(&format!(
+            "SELECT count(*)::bigint FROM kerai.edges WHERE source_id = '{}'::uuid AND target_id = '{}'::uuid AND relation = 'calls'",
+            src_id, tgt_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(edge_count2, 0, "Edge should be deleted");
+    }
+
+    #[pg_test]
+    fn test_crdt_signature_present() {
+        Spi::run(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"sig_fn\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap();
+
+        let sig_len = Spi::get_one::<i32>(
+            "SELECT octet_length(signature) FROM kerai.operations ORDER BY created_at DESC LIMIT 1",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(sig_len, 64, "Ed25519 signature should be 64 bytes");
+    }
+
+    #[pg_test]
+    fn test_crdt_ops_since_returns_operations() {
+        let fp = Spi::get_one::<String>(
+            "SELECT key_fingerprint FROM kerai.instances WHERE is_self = true",
+        )
+        .unwrap()
+        .unwrap();
+
+        // Apply two ops
+        Spi::run(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"ops_since_1\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap();
+        let r2 = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"ops_since_2\", \"position\": 1}'::jsonb)",
+        )
+        .unwrap()
+        .unwrap();
+        let seq2 = r2.0["author_seq"].as_i64().unwrap();
+
+        // Get ops since seq2-1 (should include at least the last op)
+        let ops = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.ops_since('{}', {})",
+            fp.replace('\'', "''"),
+            seq2 - 1,
+        ))
+        .unwrap()
+        .unwrap();
+        let arr = ops.0.as_array().unwrap();
+        assert!(!arr.is_empty(), "ops_since should return at least one op");
+    }
+
+    #[pg_test]
+    #[should_panic(expected = "Unknown op_type")]
+    fn test_crdt_invalid_op_type() {
+        Spi::run(
+            "SELECT kerai.apply_op('bogus_op', NULL, '{}'::jsonb)",
+        )
+        .unwrap();
+    }
+
+    #[pg_test]
+    #[should_panic(expected = "requires a node_id")]
+    fn test_crdt_update_without_node_id() {
+        Spi::run(
+            "SELECT kerai.apply_op('update_content', NULL, '{\"new_content\": \"x\"}'::jsonb)",
+        )
+        .unwrap();
     }
 }
 

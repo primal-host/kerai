@@ -2,20 +2,7 @@ use pgrx::prelude::*;
 
 // Plan 02: Parsing — moved to src/parser/mod.rs
 // Plan 03: Reconstruction — moved to src/reconstruct/mod.rs
-
-// Plan 04: CRDT Operations
-#[pg_extern]
-fn apply_op(op_type: &str, node_id: pgrx::Uuid, _payload: pgrx::JsonB) -> String {
-    format!(
-        "STUB: apply_op('{}', '{}', ...) — implemented in Plan 04",
-        op_type, node_id
-    )
-}
-
-#[pg_extern]
-fn version_vector() -> String {
-    "STUB: version_vector() — implemented in Plan 04".to_string()
-}
+// Plan 04: CRDT Operations — moved to src/crdt/mod.rs
 
 // Plan 06: Sync
 #[pg_extern]
