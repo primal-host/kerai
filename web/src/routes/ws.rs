@@ -72,8 +72,9 @@ async fn handle_client_op(pool: &Pool, text: &str) -> Result<(), String> {
         .map(|id| format!("'{}'::uuid", id.replace('\'', "''")))
         .unwrap_or_else(|| "NULL".to_string());
 
+    let empty_payload = serde_json::json!({});
     let payload = op.get("payload")
-        .unwrap_or(&serde_json::json!({}));
+        .unwrap_or(&empty_payload);
 
     let sql = format!(
         "SELECT kerai.apply_op('{}', {}, '{}'::jsonb)",
