@@ -355,6 +355,57 @@ WHERE NOT EXISTS (
     requires = ["table_associations"]
 );
 
+// Table: tasks — swarm task definitions
+extension_sql!(
+    r#"
+CREATE TABLE kerai.tasks (
+    id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    description      TEXT NOT NULL,
+    scope_node_id    UUID REFERENCES kerai.nodes(id),
+    success_command  TEXT NOT NULL,
+    budget_ops       INTEGER,
+    budget_seconds   INTEGER,
+    status           TEXT NOT NULL DEFAULT 'pending',
+    agent_kind       TEXT,
+    agent_model      TEXT,
+    agent_count      INTEGER,
+    swarm_id         UUID REFERENCES kerai.agents(id),
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_tasks_status ON kerai.tasks (status);
+CREATE INDEX idx_tasks_scope ON kerai.tasks (scope_node_id) WHERE scope_node_id IS NOT NULL;
+CREATE INDEX idx_tasks_swarm ON kerai.tasks (swarm_id) WHERE swarm_id IS NOT NULL;
+"#,
+    name = "table_tasks",
+    requires = ["table_nodes", "table_agents"]
+);
+
+// Table: test_results — UNLOGGED for write performance
+extension_sql!(
+    r#"
+CREATE UNLOGGED TABLE kerai.test_results (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    task_id         UUID NOT NULL REFERENCES kerai.tasks(id),
+    agent_id        UUID NOT NULL REFERENCES kerai.agents(id),
+    version_vector  JSONB NOT NULL DEFAULT '{}'::jsonb,
+    passed          BOOLEAN NOT NULL,
+    output          TEXT,
+    duration_ms     INTEGER,
+    ops_count       INTEGER,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_test_results_task ON kerai.test_results (task_id);
+CREATE INDEX idx_test_results_agent ON kerai.test_results (agent_id);
+CREATE INDEX idx_test_results_task_passed ON kerai.test_results (task_id, passed);
+CREATE INDEX idx_test_results_task_created ON kerai.test_results (task_id, created_at);
+"#,
+    name = "table_test_results",
+    requires = ["table_tasks", "table_agents"]
+);
+
 // Table: operations — CRDT operation log (stub for Plan 04)
 extension_sql!(
     r#"
