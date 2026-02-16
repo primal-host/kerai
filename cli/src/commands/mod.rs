@@ -11,7 +11,9 @@ pub mod perspective;
 pub mod ping;
 pub mod query;
 pub mod refs;
+pub mod swarm;
 pub mod sync;
+pub mod task;
 pub mod tree;
 pub mod version;
 
@@ -89,6 +91,37 @@ pub enum Command {
         context_id: Option<String>,
         min_agents: Option<i32>,
         min_weight: Option<f64>,
+    },
+    TaskCreate {
+        description: String,
+        success_command: String,
+        scope: Option<String>,
+        budget_ops: Option<i32>,
+        budget_seconds: Option<i32>,
+    },
+    TaskList {
+        status: Option<String>,
+    },
+    TaskShow {
+        task_id: String,
+    },
+    SwarmLaunch {
+        task_id: String,
+        agents: i32,
+        kind: String,
+        model: Option<String>,
+    },
+    SwarmStatus {
+        task_id: Option<String>,
+    },
+    SwarmStop {
+        task_id: String,
+    },
+    SwarmLeaderboard {
+        task_id: String,
+    },
+    SwarmProgress {
+        task_id: String,
     },
 }
 
@@ -169,5 +202,45 @@ pub fn run(
             min_weight,
             format,
         ),
+        Command::TaskCreate {
+            description,
+            success_command,
+            scope,
+            budget_ops,
+            budget_seconds,
+        } => task::create(
+            &mut client,
+            &description,
+            &success_command,
+            scope.as_deref(),
+            budget_ops,
+            budget_seconds,
+            format,
+        ),
+        Command::TaskList { status } => task::list(&mut client, status.as_deref(), format),
+        Command::TaskShow { task_id } => task::show(&mut client, &task_id, format),
+        Command::SwarmLaunch {
+            task_id,
+            agents,
+            kind,
+            model,
+        } => swarm::launch(
+            &mut client,
+            &task_id,
+            agents,
+            &kind,
+            model.as_deref(),
+            format,
+        ),
+        Command::SwarmStatus { task_id } => {
+            swarm::status(&mut client, task_id.as_deref(), format)
+        }
+        Command::SwarmStop { task_id } => swarm::stop(&mut client, &task_id),
+        Command::SwarmLeaderboard { task_id } => {
+            swarm::leaderboard(&mut client, &task_id, format)
+        }
+        Command::SwarmProgress { task_id } => {
+            swarm::progress(&mut client, &task_id, format)
+        }
     }
 }

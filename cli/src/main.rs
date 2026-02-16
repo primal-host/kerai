@@ -145,6 +145,18 @@ enum CliCommand {
         #[arg(long)]
         min_weight: Option<f64>,
     },
+
+    /// Manage swarm tasks
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
+
+    /// Manage agent swarms
+    Swarm {
+        #[command(subcommand)]
+        action: SwarmAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -180,6 +192,89 @@ enum PeerAction {
     Info {
         /// Peer name
         name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskAction {
+    /// Create a new task
+    Create {
+        /// Task description
+        description: String,
+
+        /// Command to verify success
+        #[arg(long)]
+        success_command: String,
+
+        /// Scope node ID (optional)
+        #[arg(long)]
+        scope: Option<String>,
+
+        /// Operation budget limit
+        #[arg(long)]
+        budget_ops: Option<i32>,
+
+        /// Time budget in seconds
+        #[arg(long)]
+        budget_seconds: Option<i32>,
+    },
+
+    /// List tasks
+    List {
+        /// Filter by status
+        #[arg(long)]
+        status: Option<String>,
+    },
+
+    /// Show task details
+    Show {
+        /// Task ID
+        task_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum SwarmAction {
+    /// Launch a swarm for a task
+    Launch {
+        /// Task ID
+        task_id: String,
+
+        /// Number of agents
+        #[arg(long, default_value = "3")]
+        agents: i32,
+
+        /// Agent kind: llm, tool, human
+        #[arg(long)]
+        kind: String,
+
+        /// Model identifier (e.g. claude-opus-4-6)
+        #[arg(long)]
+        model: Option<String>,
+    },
+
+    /// Show swarm status
+    Status {
+        /// Task ID (omit for all tasks)
+        task_id: Option<String>,
+    },
+
+    /// Stop a running swarm
+    Stop {
+        /// Task ID
+        task_id: String,
+    },
+
+    /// Show per-agent leaderboard
+    Leaderboard {
+        /// Task ID
+        task_id: String,
+    },
+
+    /// Show pass rate over time
+    Progress {
+        /// Task ID
+        task_id: String,
     },
 }
 
@@ -286,6 +381,42 @@ fn main() {
             context_id: context,
             min_agents,
             min_weight,
+        },
+        CliCommand::Task { action } => match action {
+            TaskAction::Create {
+                description,
+                success_command,
+                scope,
+                budget_ops,
+                budget_seconds,
+            } => commands::Command::TaskCreate {
+                description,
+                success_command,
+                scope,
+                budget_ops,
+                budget_seconds,
+            },
+            TaskAction::List { status } => commands::Command::TaskList { status },
+            TaskAction::Show { task_id } => commands::Command::TaskShow { task_id },
+        },
+        CliCommand::Swarm { action } => match action {
+            SwarmAction::Launch {
+                task_id,
+                agents,
+                kind,
+                model,
+            } => commands::Command::SwarmLaunch {
+                task_id,
+                agents,
+                kind,
+                model,
+            },
+            SwarmAction::Status { task_id } => commands::Command::SwarmStatus { task_id },
+            SwarmAction::Stop { task_id } => commands::Command::SwarmStop { task_id },
+            SwarmAction::Leaderboard { task_id } => {
+                commands::Command::SwarmLeaderboard { task_id }
+            }
+            SwarmAction::Progress { task_id } => commands::Command::SwarmProgress { task_id },
         },
     };
 
