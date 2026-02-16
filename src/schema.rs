@@ -357,6 +357,69 @@ WHERE NOT EXISTS (
     requires = ["table_associations"]
 );
 
+// Table: auctions — Dutch auction for knowledge attestations
+extension_sql!(
+    r#"
+CREATE TABLE kerai.auctions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    attestation_id      UUID NOT NULL REFERENCES kerai.attestations(id),
+    seller_wallet       UUID NOT NULL REFERENCES kerai.wallets(id),
+    auction_type        TEXT NOT NULL DEFAULT 'dutch',
+    starting_price      BIGINT NOT NULL,
+    floor_price         BIGINT NOT NULL DEFAULT 0,
+    current_price       BIGINT NOT NULL,
+    price_decrement     BIGINT NOT NULL,
+    decrement_interval  INTERVAL NOT NULL,
+    min_bidders         INTEGER DEFAULT 1,
+    release_type        TEXT NOT NULL DEFAULT 'simultaneous',
+    status              TEXT NOT NULL DEFAULT 'active',
+    settled_price       BIGINT,
+    open_sourced        BOOLEAN DEFAULT false,
+    open_sourced_at     TIMESTAMPTZ,
+    open_delay_hours    INTEGER NOT NULL DEFAULT 24,
+    signature           BYTEA,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    settled_at          TIMESTAMPTZ
+);
+
+CREATE INDEX idx_auctions_attestation ON kerai.auctions(attestation_id);
+CREATE INDEX idx_auctions_status ON kerai.auctions(status);
+CREATE INDEX idx_auctions_seller ON kerai.auctions(seller_wallet);
+CREATE INDEX idx_auctions_floor ON kerai.auctions(floor_price);
+"#,
+    name = "table_auctions",
+    requires = ["table_attestations", "table_wallets"]
+);
+
+// Table: bids — buyer commitments to auctions
+extension_sql!(
+    r#"
+CREATE TABLE kerai.bids (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    auction_id      UUID NOT NULL REFERENCES kerai.auctions(id),
+    bidder_wallet   UUID NOT NULL REFERENCES kerai.wallets(id),
+    max_price       BIGINT NOT NULL,
+    signature       BYTEA,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_bids_auction ON kerai.bids(auction_id);
+CREATE INDEX idx_bids_bidder ON kerai.bids(bidder_wallet);
+"#,
+    name = "table_bids",
+    requires = ["table_auctions", "table_wallets"]
+);
+
+// Alter challenges — add auction_id for marketplace integration
+extension_sql!(
+    r#"
+ALTER TABLE kerai.challenges ADD COLUMN IF NOT EXISTS auction_id UUID REFERENCES kerai.auctions(id);
+CREATE INDEX IF NOT EXISTS idx_challenges_auction ON kerai.challenges(auction_id) WHERE auction_id IS NOT NULL;
+"#,
+    name = "alter_challenges_auction",
+    requires = ["table_challenges", "table_auctions"]
+);
+
 // Table: tasks — swarm task definitions
 extension_sql!(
     r#"
