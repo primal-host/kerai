@@ -147,6 +147,19 @@ fn apply_op(op_type: &str, node_id: Option<pgrx::Uuid>, payload: pgrx::JsonB) ->
         &signature,
     );
 
+    // Notify connected listeners
+    let notify_payload = serde_json::json!({
+        "op_type": op_type,
+        "node_id": affected_id,
+        "lamport_ts": lamport_ts,
+        "author": fingerprint,
+    });
+    Spi::run(&format!(
+        "NOTIFY kerai_ops, '{}'",
+        sql_escape(&notify_payload.to_string()),
+    ))
+    .ok();
+
     pgrx::JsonB(serde_json::json!({
         "op_type": op_type,
         "node_id": affected_id,
@@ -239,6 +252,19 @@ fn apply_remote_op(op_json: pgrx::JsonB) -> pgrx::JsonB {
         payload,
         &signature,
     );
+
+    // Notify connected listeners
+    let notify_payload = serde_json::json!({
+        "op_type": op_type,
+        "node_id": affected_id,
+        "lamport_ts": lamport_ts,
+        "author": author,
+    });
+    Spi::run(&format!(
+        "NOTIFY kerai_ops, '{}'",
+        sql_escape(&notify_payload.to_string()),
+    ))
+    .ok();
 
     pgrx::JsonB(serde_json::json!({
         "status": "applied",
