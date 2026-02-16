@@ -471,6 +471,32 @@ CREATE INDEX idx_test_results_task_created ON kerai.test_results (task_id, creat
     requires = ["table_tasks", "table_agents"]
 );
 
+// Table: bounties — task bounties funded by wallets
+extension_sql!(
+    r#"
+CREATE TABLE kerai.bounties (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    poster_wallet   UUID NOT NULL REFERENCES kerai.wallets(id),
+    scope           ltree NOT NULL,
+    description     TEXT NOT NULL,
+    success_command TEXT,
+    reward          BIGINT NOT NULL CHECK (reward > 0),
+    status          TEXT NOT NULL DEFAULT 'open',
+    claimed_by      UUID REFERENCES kerai.wallets(id),
+    verified_at     TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at      TIMESTAMPTZ
+);
+
+CREATE INDEX idx_bounties_scope ON kerai.bounties USING gist (scope);
+CREATE INDEX idx_bounties_status ON kerai.bounties (status);
+CREATE INDEX idx_bounties_poster ON kerai.bounties (poster_wallet);
+CREATE INDEX idx_bounties_reward ON kerai.bounties (reward);
+"#,
+    name = "table_bounties",
+    requires = ["table_wallets"]
+);
+
 // Table: operations — CRDT operation log (stub for Plan 04)
 extension_sql!(
     r#"
