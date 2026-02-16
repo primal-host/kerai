@@ -1,4 +1,4 @@
-FROM primal-host-infra-eridu:latest AS builder
+FROM infra-eridu:latest AS builder
 WORKDIR /build
 
 # Copy web crate and workspace Cargo.lock
