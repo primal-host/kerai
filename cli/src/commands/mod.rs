@@ -3,6 +3,7 @@ pub mod bounty;
 pub mod checkout;
 pub mod commit;
 pub mod consensus_cmd;
+pub mod currency;
 pub mod find;
 pub mod info;
 pub mod init;
@@ -199,6 +200,29 @@ pub enum Command {
     },
     BountySettle {
         bounty_id: String,
+    },
+    CurrencyRegister {
+        pubkey: String,
+        wallet_type: String,
+        label: Option<String>,
+    },
+    CurrencyTransfer {
+        from: String,
+        to: String,
+        amount: i64,
+        nonce: i64,
+        signature: String,
+        reason: Option<String>,
+    },
+    CurrencySupply,
+    CurrencyShare {
+        wallet_id: String,
+    },
+    CurrencySchedule,
+    CurrencySetReward {
+        work_type: String,
+        reward: i64,
+        enabled: Option<bool>,
     },
 }
 
@@ -409,5 +433,37 @@ pub fn run(
             wallet_id,
         } => bounty::claim(&mut client, &bounty_id, &wallet_id, format),
         Command::BountySettle { bounty_id } => bounty::settle(&mut client, &bounty_id, format),
+        Command::CurrencyRegister {
+            pubkey,
+            wallet_type,
+            label,
+        } => currency::register(&mut client, &pubkey, &wallet_type, label.as_deref(), format),
+        Command::CurrencyTransfer {
+            from,
+            to,
+            amount,
+            nonce,
+            signature,
+            reason,
+        } => currency::transfer(
+            &mut client,
+            &from,
+            &to,
+            amount,
+            nonce,
+            &signature,
+            reason.as_deref(),
+            format,
+        ),
+        Command::CurrencySupply => currency::supply(&mut client, format),
+        Command::CurrencyShare { wallet_id } => {
+            currency::share(&mut client, &wallet_id, format)
+        }
+        Command::CurrencySchedule => currency::schedule(&mut client, format),
+        Command::CurrencySetReward {
+            work_type,
+            reward,
+            enabled,
+        } => currency::set_reward(&mut client, &work_type, reward, enabled, format),
     }
 }

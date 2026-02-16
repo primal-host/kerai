@@ -175,6 +175,12 @@ enum CliCommand {
         #[command(subcommand)]
         action: BountyAction,
     },
+
+    /// Native currency — registration, signed transfers, supply, mining
+    Currency {
+        #[command(subcommand)]
+        action: CurrencyAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -540,6 +546,78 @@ enum AgentAction {
     },
 }
 
+#[derive(Subcommand)]
+enum CurrencyAction {
+    /// Register a wallet with a client-provided Ed25519 public key
+    Register {
+        /// Ed25519 public key (hex-encoded, 64 chars)
+        #[arg(long)]
+        pubkey: String,
+
+        /// Wallet type: human, agent, or external
+        #[arg(long)]
+        r#type: String,
+
+        /// Optional label
+        #[arg(long)]
+        label: Option<String>,
+    },
+
+    /// Signed transfer between wallets
+    Transfer {
+        /// Source wallet ID
+        #[arg(long)]
+        from: String,
+
+        /// Destination wallet ID
+        #[arg(long)]
+        to: String,
+
+        /// Amount to transfer
+        #[arg(long)]
+        amount: i64,
+
+        /// Nonce (must be current wallet nonce + 1)
+        #[arg(long)]
+        nonce: i64,
+
+        /// Ed25519 signature (hex-encoded)
+        #[arg(long)]
+        signature: String,
+
+        /// Transfer reason
+        #[arg(long)]
+        reason: Option<String>,
+    },
+
+    /// Show total supply info
+    Supply,
+
+    /// Show wallet share of total supply
+    Share {
+        /// Wallet ID
+        wallet_id: String,
+    },
+
+    /// List reward schedule
+    Schedule,
+
+    /// Create or update a reward schedule entry
+    SetReward {
+        /// Work type identifier
+        #[arg(long)]
+        work_type: String,
+
+        /// Reward amount in kōi
+        #[arg(long)]
+        reward: i64,
+
+        /// Enable or disable this reward
+        #[arg(long)]
+        enabled: Option<bool>,
+    },
+}
+
 fn main() {
     let cli = Cli::parse();
 
@@ -739,6 +817,46 @@ fn main() {
                 commands::Command::MarketCommons { scope, since }
             }
             MarketAction::Stats => commands::Command::MarketStats,
+        },
+        CliCommand::Currency { action } => match action {
+            CurrencyAction::Register {
+                pubkey,
+                r#type,
+                label,
+            } => commands::Command::CurrencyRegister {
+                pubkey,
+                wallet_type: r#type,
+                label,
+            },
+            CurrencyAction::Transfer {
+                from,
+                to,
+                amount,
+                nonce,
+                signature,
+                reason,
+            } => commands::Command::CurrencyTransfer {
+                from,
+                to,
+                amount,
+                nonce,
+                signature,
+                reason,
+            },
+            CurrencyAction::Supply => commands::Command::CurrencySupply,
+            CurrencyAction::Share { wallet_id } => {
+                commands::Command::CurrencyShare { wallet_id }
+            }
+            CurrencyAction::Schedule => commands::Command::CurrencySchedule,
+            CurrencyAction::SetReward {
+                work_type,
+                reward,
+                enabled,
+            } => commands::Command::CurrencySetReward {
+                work_type,
+                reward,
+                enabled,
+            },
         },
     };
 
