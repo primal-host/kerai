@@ -6,6 +6,7 @@ mod consensus;
 mod crdt;
 mod functions;
 mod identity;
+mod marketplace;
 mod parser;
 mod peers;
 mod perspectives;
@@ -15,6 +16,7 @@ mod schema;
 mod swarm;
 mod tasks;
 mod workers;
+mod zkp;
 
 #[pgrx::pg_guard]
 pub extern "C-unwind" fn _PG_init() {
@@ -1820,6 +1822,306 @@ impl Config {
         .unwrap();
         let arr = result.0.as_array().unwrap();
         assert!(arr.len() >= 2, "Should show at least 2 tasks in overview");
+    }
+
+    // --- Plan 10: Marketplace tests ---
+
+    /// Helper: create an attestation for the self instance. Returns attestation_id.
+    fn create_test_attestation(scope: &str, claim_type: &str) -> String {
+        Spi::get_one::<String>(&format!(
+            "INSERT INTO kerai.attestations (instance_id, scope, claim_type, perspective_count, avg_weight)
+             SELECT id, '{}'::ltree, '{}', 3, 0.75
+             FROM kerai.instances WHERE is_self = true
+             RETURNING id::text",
+            sql_escape(scope),
+            sql_escape(claim_type),
+        ))
+        .unwrap()
+        .unwrap()
+    }
+
+    #[pg_test]
+    fn test_create_auction() {
+        let att_id = create_test_attestation("pkg.auth", "expertise");
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 80000, 0, 1000, 3600, 1, 24)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert_eq!(obj["starting_price"].as_i64().unwrap(), 80000);
+        assert_eq!(obj["current_price"].as_i64().unwrap(), 80000);
+        assert_eq!(obj["status"].as_str().unwrap(), "active");
+    }
+
+    #[pg_test]
+    #[should_panic(expected = "active auction already exists")]
+    fn test_create_auction_duplicate() {
+        let att_id = create_test_attestation("pkg.dup", "expertise");
+        Spi::run(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 50000, 0, 500, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap();
+        // Second auction on same attestation should fail
+        Spi::run(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 50000, 0, 500, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap();
+    }
+
+    #[pg_test]
+    fn test_place_bid() {
+        let att_id = create_test_attestation("pkg.bid", "state_transition");
+        let auction = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 50000, 0, 1000, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let auction_id = auction.0["id"].as_str().unwrap();
+
+        let bid = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.place_bid('{}'::uuid, 40000)",
+            auction_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(bid.0["max_price"].as_i64().unwrap(), 40000);
+        assert!(bid.0.as_object().unwrap().contains_key("id"));
+    }
+
+    #[pg_test]
+    fn test_tick_auction_price_decrement() {
+        let att_id = create_test_attestation("pkg.tick", "expertise");
+        let auction = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 10000, 0, 2000, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let auction_id = auction.0["id"].as_str().unwrap();
+
+        let tick = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.tick_auction('{}'::uuid)",
+            auction_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(tick.0["current_price"].as_i64().unwrap(), 8000);
+        assert_eq!(tick.0["action"].as_str().unwrap(), "price_decremented");
+    }
+
+    #[pg_test]
+    fn test_tick_auction_floor_hit() {
+        let att_id = create_test_attestation("pkg.floor", "expertise");
+        let auction = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 3000, 0, 5000, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let auction_id = auction.0["id"].as_str().unwrap();
+
+        // Decrement 5000 from 3000 should hit floor
+        let tick = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.tick_auction('{}'::uuid)",
+            auction_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(tick.0["action"].as_str().unwrap(), "open_sourced");
+        assert_eq!(tick.0["reason"].as_str().unwrap(), "floor_price_hit");
+    }
+
+    #[pg_test]
+    fn test_tick_auction_settlement_ready() {
+        let att_id = create_test_attestation("pkg.settle_ready", "expertise");
+        let auction = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 50000, 0, 1000, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let auction_id = auction.0["id"].as_str().unwrap();
+
+        // Place a bid high enough for the decremented price
+        Spi::run(&format!(
+            "SELECT kerai.place_bid('{}'::uuid, 49000)",
+            auction_id,
+        ))
+        .unwrap();
+
+        let tick = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.tick_auction('{}'::uuid)",
+            auction_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(tick.0["action"].as_str().unwrap(), "settlement_ready");
+        assert!(tick.0["qualifying_bidders"].as_i64().unwrap() >= 1);
+    }
+
+    #[pg_test]
+    fn test_settle_auction() {
+        let att_id = create_test_attestation("pkg.settle", "expertise");
+        let auction = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 10000, 0, 1000, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let auction_id = auction.0["id"].as_str().unwrap();
+
+        // Place a bid
+        Spi::run(&format!(
+            "SELECT kerai.place_bid('{}'::uuid, 10000)",
+            auction_id,
+        ))
+        .unwrap();
+
+        // Settle at current price (10000)
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.settle_auction('{}'::uuid)",
+            auction_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert_eq!(obj["status"].as_str().unwrap(), "settled");
+        assert_eq!(obj["settled_price"].as_i64().unwrap(), 10000);
+        assert_eq!(obj["bidder_count"].as_i64().unwrap(), 1);
+        assert_eq!(obj["total_revenue"].as_i64().unwrap(), 10000);
+    }
+
+    #[pg_test]
+    fn test_open_source_auction() {
+        let att_id = create_test_attestation("pkg.opensource", "expertise");
+        let auction = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 5000, 0, 500, 60, 1, 0)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let auction_id = auction.0["id"].as_str().unwrap();
+
+        // Place bid and settle
+        Spi::run(&format!(
+            "SELECT kerai.place_bid('{}'::uuid, 5000)",
+            auction_id,
+        ))
+        .unwrap();
+        Spi::run(&format!(
+            "SELECT kerai.settle_auction('{}'::uuid)",
+            auction_id,
+        ))
+        .unwrap();
+
+        // Open-source
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.open_source_auction('{}'::uuid)",
+            auction_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.0["status"].as_str().unwrap(), "open_sourced");
+    }
+
+    #[pg_test]
+    fn test_market_browse() {
+        let att_id = create_test_attestation("pkg.browse", "expertise");
+        Spi::run(&format!(
+            "SELECT kerai.create_auction('{}'::uuid, 20000, 0, 500, 60, 1, 24)",
+            att_id,
+        ))
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.market_browse(NULL, NULL, 'active')",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(!arr.is_empty(), "Should find at least one active auction");
+    }
+
+    #[pg_test]
+    fn test_market_stats() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.market_stats()",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj.contains_key("active_auctions"));
+        assert!(obj.contains_key("settled_auctions"));
+        assert!(obj.contains_key("open_sourced"));
+        assert!(obj.contains_key("total_bids"));
+        assert!(obj.contains_key("total_settlement_value"));
+        assert!(obj.contains_key("avg_settlement_price"));
+    }
+
+    #[pg_test]
+    fn test_generate_and_verify_proof() {
+        let att_id = create_test_attestation("pkg.zkp", "state_transition");
+
+        // Generate proof
+        let proof = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.generate_proof('{}'::uuid)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = proof.0.as_object().unwrap();
+        assert_eq!(obj["proof_type"].as_str().unwrap(), "sha256_commitment");
+        let proof_hex = obj["proof_hex"].as_str().unwrap();
+        assert_eq!(proof_hex.len(), 64, "SHA-256 hex should be 64 chars");
+
+        // Verify proof using stored proof_data
+        let verify = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.verify_proof('{}'::uuid,
+                (SELECT proof_data FROM kerai.attestations WHERE id = '{}'::uuid))",
+            att_id, att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(verify.0["valid"].as_bool().unwrap(), "Proof should verify");
+    }
+
+    #[pg_test]
+    fn test_verify_proof_invalid() {
+        let att_id = create_test_attestation("pkg.bad_proof", "expertise");
+        Spi::run(&format!(
+            "SELECT kerai.generate_proof('{}'::uuid)",
+            att_id,
+        ))
+        .unwrap();
+
+        // Verify with wrong proof data
+        let verify = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.verify_proof('{}'::uuid, '\\xdeadbeef'::bytea)",
+            att_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(!verify.0["valid"].as_bool().unwrap(), "Invalid proof should fail");
+    }
+
+    #[pg_test]
+    fn test_market_balance() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.market_balance()",
+        )
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj.contains_key("earnings"));
+        assert!(obj.contains_key("spending"));
+        assert!(obj.contains_key("net"));
+        assert!(obj.contains_key("active_auctions"));
+        assert!(obj.contains_key("active_bids"));
     }
 
     // --- Plan 12: Markdown parser tests ---
