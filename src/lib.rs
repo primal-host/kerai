@@ -1822,6 +1822,262 @@ impl Config {
         assert!(arr.len() >= 2, "Should show at least 2 tasks in overview");
     }
 
+    // --- Plan 12: Markdown parser tests ---
+
+    #[pg_test]
+    fn test_parse_markdown_headings() {
+        let source = "# Title\n\n## Section One\n\nParagraph under section one.\n\n## Section Two\n\n### Subsection\n\nDeep content.\n";
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.parse_markdown('{}', 'headings.md')",
+            sql_escape(source),
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert!(obj["nodes"].as_u64().unwrap() > 0, "Should have parsed nodes");
+
+        // Verify heading hierarchy: H2 should be child of H1
+        let h1_id = Spi::get_one::<String>(
+            "SELECT id::text FROM kerai.nodes WHERE kind = 'heading' AND content = 'Title'",
+        )
+        .unwrap()
+        .unwrap();
+
+        let h2_parent = Spi::get_one::<String>(
+            "SELECT parent_id::text FROM kerai.nodes WHERE kind = 'heading' AND content = 'Section One'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(h2_parent, h1_id, "H2 should be child of H1");
+
+        // H3 should be child of H2 (Section Two)
+        let h2_two_id = Spi::get_one::<String>(
+            "SELECT id::text FROM kerai.nodes WHERE kind = 'heading' AND content = 'Section Two'",
+        )
+        .unwrap()
+        .unwrap();
+
+        let h3_parent = Spi::get_one::<String>(
+            "SELECT parent_id::text FROM kerai.nodes WHERE kind = 'heading' AND content = 'Subsection'",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(h3_parent, h2_two_id, "H3 should be child of its preceding H2");
+    }
+
+    #[pg_test]
+    fn test_parse_markdown_paragraphs() {
+        let source = "# Main\n\nFirst paragraph.\n\nSecond paragraph.\n";
+        Spi::run(&format!(
+            "SELECT kerai.parse_markdown('{}', 'paragraphs.md')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let heading_id = Spi::get_one::<String>(
+            "SELECT id::text FROM kerai.nodes WHERE kind = 'heading' AND content = 'Main'",
+        )
+        .unwrap()
+        .unwrap();
+
+        // Paragraphs should be children of the heading
+        let para_count = Spi::get_one::<i64>(&format!(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'paragraph' AND parent_id = '{}'::uuid",
+            heading_id,
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(para_count >= 2, "Should have at least 2 paragraphs under heading, got {}", para_count);
+    }
+
+    #[pg_test]
+    fn test_parse_markdown_code_block() {
+        let source = "# Code\n\n```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n";
+        Spi::run(&format!(
+            "SELECT kerai.parse_markdown('{}', 'codeblock.md')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let lang = Spi::get_one::<pgrx::JsonB>(
+            "SELECT metadata FROM kerai.nodes WHERE kind = 'code_block' LIMIT 1",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(lang.0["language"].as_str().unwrap(), "rust", "Code block should preserve language metadata");
+    }
+
+    #[pg_test]
+    fn test_parse_markdown_links() {
+        let source = "# Links\n\n[Example](https://example.com) and [local](other.md).\n";
+        Spi::run(&format!(
+            "SELECT kerai.parse_markdown('{}', 'links.md')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let link_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'link'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(link_count >= 2, "Should have at least 2 link nodes, got {}", link_count);
+
+        // Check URL metadata
+        let meta = Spi::get_one::<pgrx::JsonB>(
+            "SELECT metadata FROM kerai.nodes WHERE kind = 'link' AND content LIKE '%Example%' LIMIT 1",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(meta.0["url"].as_str().unwrap(), "https://example.com");
+    }
+
+    #[pg_test]
+    fn test_parse_markdown_table() {
+        let source = "# Tables\n\n| Name | Value |\n| --- | --- |\n| foo | 42 |\n| bar | 99 |\n";
+        Spi::run(&format!(
+            "SELECT kerai.parse_markdown('{}', 'table.md')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let table_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'table'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(table_count >= 1, "Should have at least 1 table node");
+
+        let cell_count = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'table_cell'",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(cell_count >= 4, "Should have at least 4 table cells (2 cols x 2+ rows), got {}", cell_count);
+    }
+
+    #[pg_test]
+    fn test_parse_markdown_roundtrip() {
+        let source = "# Hello World\n\nThis is a paragraph.\n\n## Details\n\n- Item one\n- Item two\n";
+        Spi::run(&format!(
+            "SELECT kerai.parse_markdown('{}', 'roundtrip.md')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let doc_id = Spi::get_one::<pgrx::Uuid>(
+            "SELECT id FROM kerai.nodes WHERE kind = 'document' AND content = 'roundtrip.md'",
+        )
+        .unwrap()
+        .unwrap();
+
+        let reconstructed = Spi::get_one::<String>(&format!(
+            "SELECT kerai.reconstruct_markdown('{}'::uuid)",
+            doc_id,
+        ))
+        .unwrap()
+        .unwrap();
+
+        // Verify key content is preserved
+        assert!(reconstructed.contains("# Hello World"), "Should contain H1");
+        assert!(reconstructed.contains("This is a paragraph"), "Should contain paragraph text");
+        assert!(reconstructed.contains("## Details"), "Should contain H2");
+        assert!(reconstructed.contains("Item one"), "Should contain list items");
+    }
+
+    #[pg_test]
+    fn test_parse_markdown_idempotent() {
+        let source = "# Idempotent\n\nSame content.\n";
+        Spi::run(&format!(
+            "SELECT kerai.parse_markdown('{}', 'idempotent.md')",
+            sql_escape(source),
+        ))
+        .unwrap();
+        let count1 = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'document' AND content = 'idempotent.md'",
+        )
+        .unwrap()
+        .unwrap();
+
+        // Parse again — should delete and re-insert
+        Spi::run(&format!(
+            "SELECT kerai.parse_markdown('{}', 'idempotent.md')",
+            sql_escape(source),
+        ))
+        .unwrap();
+        let count2 = Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM kerai.nodes WHERE kind = 'document' AND content = 'idempotent.md'",
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(count1, count2, "Idempotent parse should not duplicate document nodes");
+        assert_eq!(count1, 1, "Should have exactly one document node");
+    }
+
+    // --- Plan 12: FTS search tests ---
+
+    #[pg_test]
+    fn test_search_fts_basic() {
+        Spi::run(
+            "SELECT kerai.parse_source('fn calculate_total() { let sum = 0; }', 'fts_basic.rs')",
+        )
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.search('calculate', NULL, NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(!arr.is_empty(), "FTS should find nodes matching 'calculate'");
+    }
+
+    #[pg_test]
+    fn test_search_fts_with_kind_filter() {
+        Spi::run(
+            "SELECT kerai.parse_source('struct SearchTarget { value: i32 }', 'fts_kind.rs')",
+        )
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.search('SearchTarget', 'struct', NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        for item in arr {
+            assert_eq!(item["kind"].as_str().unwrap(), "struct");
+        }
+    }
+
+    #[pg_test]
+    fn test_search_fts_no_matches() {
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.search('xyzzy_nonexistent_term_zzz', NULL, NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(arr.is_empty(), "FTS should return empty for non-matching terms");
+    }
+
+    #[pg_test]
+    fn test_context_search_without_agents() {
+        Spi::run(
+            "SELECT kerai.parse_source('fn context_target() {}', 'ctx_search.rs')",
+        )
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.context_search('context_target', NULL, NULL)",
+        )
+        .unwrap()
+        .unwrap();
+        let arr = result.0.as_array().unwrap();
+        assert!(!arr.is_empty(), "context_search without agents should still return FTS results");
+    }
+
     /// sql_escape helper for tests
     fn sql_escape(s: &str) -> String {
         s.replace('\'', "''")
