@@ -52,9 +52,4 @@ impl Pool {
 
         Ok(client)
     }
-
-    /// Get a dedicated connection for LISTEN (long-lived).
-    pub async fn listen_connection(&self) -> Result<tokio_postgres::Client, tokio_postgres::Error> {
-        self.connect().await
-    }
 }
