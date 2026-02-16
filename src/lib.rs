@@ -893,6 +893,162 @@ impl Config {
         )
         .unwrap();
     }
+
+    // --- Plan 06: Peer sync tests ---
+
+    /// Generate a test Ed25519 keypair. Returns (public_key_hex, fingerprint).
+    fn generate_test_keypair() -> (String, String) {
+        let mut rng = rand::rngs::OsRng;
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rng);
+        let verifying_key = signing_key.verifying_key();
+        let pk_hex: String = verifying_key.as_bytes().iter().map(|b| format!("{:02x}", b)).collect();
+        let fp = crate::identity::fingerprint(&verifying_key);
+        (pk_hex, fp)
+    }
+
+    #[pg_test]
+    fn test_register_peer() {
+        let (pk_hex, _fp) = generate_test_keypair();
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.register_peer('test-peer-1', '{}', 'https://peer1.example.com', NULL)",
+            pk_hex,
+        ))
+        .unwrap()
+        .unwrap();
+        let obj = result.0.as_object().unwrap();
+        assert_eq!(obj["name"].as_str().unwrap(), "test-peer-1");
+        assert!(obj["is_new"].as_bool().unwrap());
+        assert!(obj.contains_key("key_fingerprint"));
+        assert!(obj.contains_key("id"));
+    }
+
+    #[pg_test]
+    fn test_register_peer_idempotent() {
+        let (pk_hex, _) = generate_test_keypair();
+        // First registration
+        let r1 = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.register_peer('peer-idem', '{}', NULL, NULL)",
+            pk_hex,
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(r1.0["is_new"].as_bool().unwrap());
+
+        // Second registration with updated endpoint
+        let r2 = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.register_peer('peer-idem-updated', '{}', 'https://updated.example.com', NULL)",
+            pk_hex,
+        ))
+        .unwrap()
+        .unwrap();
+        assert!(!r2.0["is_new"].as_bool().unwrap());
+        assert_eq!(r2.0["endpoint"].as_str().unwrap(), "https://updated.example.com");
+    }
+
+    #[pg_test]
+    fn test_list_peers_after_add() {
+        let (pk_hex, _) = generate_test_keypair();
+        Spi::run(&format!(
+            "SELECT kerai.register_peer('list-test-peer', '{}', NULL, NULL)",
+            pk_hex,
+        ))
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>("SELECT kerai.list_peers()")
+            .unwrap()
+            .unwrap();
+        let arr = result.0.as_array().unwrap();
+        let names: Vec<&str> = arr.iter().filter_map(|v| v["name"].as_str()).collect();
+        assert!(names.contains(&"list-test-peer"), "Registered peer should appear in list");
+    }
+
+    #[pg_test]
+    fn test_get_peer() {
+        let (pk_hex, fp) = generate_test_keypair();
+        Spi::run(&format!(
+            "SELECT kerai.register_peer('get-test-peer', '{}', NULL, NULL)",
+            pk_hex,
+        ))
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.get_peer('{}')",
+            fp.replace('\'', "''"),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(result.0["name"].as_str().unwrap(), "get-test-peer");
+    }
+
+    #[pg_test]
+    fn test_remove_peer() {
+        let (pk_hex, _) = generate_test_keypair();
+        Spi::run(&format!(
+            "SELECT kerai.register_peer('remove-me', '{}', NULL, NULL)",
+            pk_hex,
+        ))
+        .unwrap();
+
+        let result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.remove_peer('remove-me')",
+        )
+        .unwrap()
+        .unwrap();
+        assert!(result.0["removed"].as_bool().unwrap());
+    }
+
+    #[pg_test]
+    #[should_panic(expected = "Cannot remove self instance")]
+    fn test_cannot_remove_self() {
+        let self_name = Spi::get_one::<String>(
+            "SELECT name FROM kerai.instances WHERE is_self = true",
+        )
+        .unwrap()
+        .unwrap();
+
+        Spi::run(&format!(
+            "SELECT kerai.remove_peer('{}')",
+            self_name.replace('\'', "''"),
+        ))
+        .unwrap();
+    }
+
+    #[pg_test]
+    fn test_self_public_key_hex() {
+        let pk_hex = Spi::get_one::<String>("SELECT kerai.self_public_key_hex()")
+            .unwrap()
+            .unwrap();
+        assert_eq!(pk_hex.len(), 64, "Hex-encoded 32-byte key should be 64 chars");
+    }
+
+    #[pg_test]
+    fn test_ops_since_includes_public_key() {
+        // Create an op first
+        Spi::run(
+            "SELECT kerai.apply_op('insert_node', NULL, '{\"kind\": \"fn\", \"content\": \"pk_test\", \"position\": 0}'::jsonb)",
+        )
+        .unwrap();
+
+        let fp = Spi::get_one::<String>(
+            "SELECT key_fingerprint FROM kerai.instances WHERE is_self = true",
+        )
+        .unwrap()
+        .unwrap();
+
+        let ops = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.ops_since('{}', 0)",
+            fp.replace('\'', "''"),
+        ))
+        .unwrap()
+        .unwrap();
+        let arr = ops.0.as_array().unwrap();
+        assert!(!arr.is_empty());
+        // Each op should have a public_key field
+        let first = &arr[0];
+        assert!(first.get("public_key").is_some(), "ops_since should include public_key");
+        let pk = first["public_key"].as_str().unwrap();
+        assert_eq!(pk.len(), 64, "public_key should be 64 hex chars");
+    }
 }
 
 #[cfg(test)]

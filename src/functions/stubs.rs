@@ -3,20 +3,7 @@ use pgrx::prelude::*;
 // Plan 02: Parsing — moved to src/parser/mod.rs
 // Plan 03: Reconstruction — moved to src/reconstruct/mod.rs
 // Plan 04: CRDT Operations — moved to src/crdt/mod.rs
-
-// Plan 06: Sync
-#[pg_extern]
-fn sync(peer: &str) -> String {
-    format!("STUB: sync('{}') — implemented in Plan 06", peer)
-}
-
-#[pg_extern]
-fn join_network(endpoint: &str) -> String {
-    format!(
-        "STUB: join_network('{}') — implemented in Plan 06",
-        endpoint
-    )
-}
+// Plan 06: Peer Sync — moved to src/peers.rs + cli/src/commands/sync.rs
 
 // Plan 07: Query / Navigation
 #[pg_extern]

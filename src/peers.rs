@@ -22,12 +22,11 @@ fn register_peer(
     if pk_bytes.len() != 32 {
         error!("Public key must be 32 bytes (got {})", pk_bytes.len());
     }
+    let pk_hex_pg: String = pk_bytes.iter().map(|b| format!("{:02x}", b)).collect();
     let pk_array: [u8; 32] = pk_bytes.try_into().unwrap();
     let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&pk_array)
         .unwrap_or_else(|_| error!("Invalid Ed25519 public key"));
     let fp = identity::fingerprint(&verifying_key);
-
-    let pk_hex_pg: String = pk_bytes.iter().map(|b| format!("{:02x}", b)).collect();
     let endpoint_sql = match endpoint {
         Some(e) => format!("'{}'", sql_escape(e)),
         None => "NULL".to_string(),
