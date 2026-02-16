@@ -10,6 +10,7 @@ mod economy;
 mod functions;
 mod identity;
 mod marketplace;
+mod microgpt;
 mod parser;
 mod peers;
 mod perspectives;

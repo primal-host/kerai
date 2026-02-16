@@ -590,3 +590,83 @@ ALTER TABLE kerai.wallets ADD COLUMN nonce BIGINT NOT NULL DEFAULT 0;
     name = "alter_wallets_nonce",
     requires = ["table_wallets"]
 );
+
+// Table: model_vocab — node UUID ↔ dense integer index per model
+extension_sql!(
+    r#"
+CREATE TABLE kerai.model_vocab (
+    model_id    UUID NOT NULL REFERENCES kerai.agents(id),
+    node_id     UUID NOT NULL REFERENCES kerai.nodes(id),
+    token_idx   INTEGER NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (model_id, token_idx),
+    UNIQUE (model_id, node_id)
+);
+
+CREATE INDEX idx_model_vocab_node ON kerai.model_vocab (node_id);
+"#,
+    name = "table_model_vocab",
+    requires = ["table_agents", "table_nodes"]
+);
+
+// Table: model_weights — one row per named tensor per agent
+extension_sql!(
+    r#"
+CREATE TABLE kerai.model_weights (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id    UUID NOT NULL REFERENCES kerai.agents(id),
+    tensor_name TEXT NOT NULL,
+    tensor_data BYTEA NOT NULL,
+    shape       INTEGER[] NOT NULL,
+    version     BIGINT NOT NULL DEFAULT 1,
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (agent_id, tensor_name)
+);
+
+CREATE INDEX idx_model_weights_agent ON kerai.model_weights (agent_id);
+"#,
+    name = "table_model_weights",
+    requires = ["table_agents"]
+);
+
+// Table: training_runs — audit log
+extension_sql!(
+    r#"
+CREATE TABLE kerai.training_runs (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id    UUID NOT NULL REFERENCES kerai.agents(id),
+    config      JSONB NOT NULL,
+    walk_type   TEXT NOT NULL,
+    scope       ltree,
+    n_sequences INTEGER NOT NULL,
+    n_steps     INTEGER NOT NULL,
+    final_loss  DOUBLE PRECISION,
+    duration_ms INTEGER,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_training_runs_agent ON kerai.training_runs (agent_id);
+"#,
+    name = "table_training_runs",
+    requires = ["table_agents"]
+);
+
+// Table: inference_log — UNLOGGED for perf
+extension_sql!(
+    r#"
+CREATE UNLOGGED TABLE kerai.inference_log (
+    id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    agent_id      UUID NOT NULL,
+    context_nodes UUID[] NOT NULL,
+    predicted     UUID NOT NULL,
+    score         DOUBLE PRECISION NOT NULL,
+    selected      BOOLEAN DEFAULT false,
+    cost_koi      BIGINT DEFAULT 0,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_inference_log_agent ON kerai.inference_log (agent_id);
+"#,
+    name = "table_inference_log",
+    requires = ["table_agents"]
+);
