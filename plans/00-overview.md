@@ -66,12 +66,12 @@ Code as structured data (nodes, edges)
             → Private knowledge depreciates (Dutch auctions, floor prices)
               → All knowledge eventually becomes open (open-source at floor)
                 → External participation: humans and AIs hold, trade, and speculate
-                  → Compute cost parity: credit price converges to cost of knowledge production
+                  → Compute cost parity: kōi price converges to cost of knowledge production
                     → Knowledge editor: humans write with AI-assisted structural awareness
                       → New knowledge compounds: connections surface connections
 ```
 
-Each step follows from the previous. The same schema, same CRDT sync, same cryptographic identity carries through the entire chain. The final step — external participation — is not a bolt-on but a natural consequence: if credits have real utility, external actors will want them. Plan 11 channels that inevitability into something coherent rather than letting a shadow economy form.
+Each step follows from the previous. The same schema, same CRDT sync, same cryptographic identity carries through the entire chain. The final step — external participation — is not a bolt-on but a natural consequence: if kōi have real utility, external actors will want them. Plan 11 channels that inevitability into something coherent rather than letting a shadow economy form.
 
 ## Key References
 
