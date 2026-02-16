@@ -11,7 +11,7 @@ MSG="${1:-}"
 
 if [ -n "$MSG" ]; then
     git add -A
-    git commit -m "$MSG"
+    git diff --cached --quiet || git commit -m "$MSG"
 fi
 
 GITEA_TOKEN=$(cat ~/.claude/credentials/gitea-token.txt | tr -d '[:space:]')
