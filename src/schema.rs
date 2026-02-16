@@ -60,6 +60,8 @@ CREATE INDEX idx_nodes_parent ON kerai.nodes (parent_id);
 CREATE INDEX idx_nodes_path ON kerai.nodes USING gist (path);
 CREATE INDEX idx_nodes_language ON kerai.nodes (language) WHERE language IS NOT NULL;
 CREATE INDEX idx_nodes_parent_position ON kerai.nodes (parent_id, position);
+CREATE INDEX idx_nodes_content_fts ON kerai.nodes
+    USING gin (to_tsvector('english', COALESCE(content, '')));
 "#,
     name = "table_nodes",
     requires = ["table_instances"]
