@@ -240,7 +240,7 @@ pub fn walk_markdown(
 }
 
 /// Extract kind, metadata, and optional name from a pulldown-cmark Tag.
-fn tag_to_kind_meta(tag: &Tag) -> (&str, Value, Option<String>) {
+fn tag_to_kind_meta<'a>(tag: &'a Tag<'a>) -> (&'a str, Value, Option<String>) {
     match tag {
         Tag::Heading { level, id, .. } => {
             let lvl = heading_level_num(level);
