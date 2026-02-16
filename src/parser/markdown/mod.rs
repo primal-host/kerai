@@ -93,6 +93,16 @@ fn parse_markdown(source: &str, filename: &str) -> pgrx::JsonB {
     inserter::insert_nodes(&nodes);
     inserter::insert_edges(&edges);
 
+    // Auto-mint reward for markdown parsing
+    if node_count > 0 {
+        let details = json!({"file": filename, "nodes": node_count, "edges": edge_count});
+        let details_str = details.to_string().replace('\'', "''");
+        let _ = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mint_reward('parse_markdown', '{}'::jsonb)",
+            details_str,
+        ));
+    }
+
     let elapsed = start.elapsed();
     pgrx::JsonB(json!({
         "file": filename,

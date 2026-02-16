@@ -91,6 +91,20 @@ fn parse_crate(path: &str) -> pgrx::JsonB {
     }
 
     let elapsed = start.elapsed();
+
+    // Auto-mint reward for crate parsing
+    let details = json!({
+        "crate": crate_name,
+        "files": file_count,
+        "nodes": total_nodes,
+        "edges": total_edges,
+    });
+    let details_str = details.to_string().replace('\'', "''");
+    let _ = Spi::get_one::<pgrx::JsonB>(&format!(
+        "SELECT kerai.mint_reward('parse_crate', '{}'::jsonb)",
+        details_str,
+    ));
+
     pgrx::JsonB(json!({
         "crate": crate_name,
         "files": file_count,
@@ -125,6 +139,16 @@ fn parse_file(path: &str) -> pgrx::JsonB {
     let (node_count, edge_count) =
         parse_single_file(&source, &filename, &instance_id, None, &filename, 0);
 
+    // Auto-mint reward for file parsing
+    if node_count > 0 {
+        let details = json!({"file": filename, "nodes": node_count, "edges": edge_count});
+        let details_str = details.to_string().replace('\'', "''");
+        let _ = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mint_reward('parse_file', '{}'::jsonb)",
+            details_str,
+        ));
+    }
+
     let elapsed = start.elapsed();
     pgrx::JsonB(json!({
         "file": filename,
@@ -145,6 +169,16 @@ fn parse_source(source: &str, filename: &str) -> pgrx::JsonB {
 
     let (node_count, edge_count) =
         parse_single_file(source, filename, &instance_id, None, filename, 0);
+
+    // Auto-mint reward for source parsing
+    if node_count > 0 {
+        let details = json!({"file": filename, "nodes": node_count, "edges": edge_count});
+        let details_str = details.to_string().replace('\'', "''");
+        let _ = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mint_reward('parse_file', '{}'::jsonb)",
+            details_str,
+        ));
+    }
 
     let elapsed = start.elapsed();
     pgrx::JsonB(json!({
