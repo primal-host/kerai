@@ -17,6 +17,10 @@ const VALID_OP_TYPES: &[&str] = &[
     "delete_node",
     "insert_edge",
     "delete_edge",
+    "set_perspective",
+    "delete_perspective",
+    "set_association",
+    "delete_association",
 ];
 
 /// Validate that op_type is known and node_id requirements are met.
@@ -25,8 +29,15 @@ pub fn validate_op(op_type: &str, node_id: Option<&str>, _payload: &Value) {
         error!("Unknown op_type: '{}'", op_type);
     }
 
-    // insert_node does not require node_id; all others do
-    if op_type != "insert_node" && node_id.is_none() {
+    // These ops do not require node_id (they use agent_id from payload)
+    let no_node_id_ops = [
+        "insert_node",
+        "set_perspective",
+        "delete_perspective",
+        "set_association",
+        "delete_association",
+    ];
+    if !no_node_id_ops.contains(&op_type) && node_id.is_none() {
         error!("op_type '{}' requires a node_id", op_type);
     }
 }
@@ -71,6 +82,10 @@ pub fn apply(
             apply_delete_edge(nid, payload);
             nid.to_string()
         }
+        "set_perspective" => apply_set_perspective(payload),
+        "delete_perspective" => apply_delete_perspective(payload),
+        "set_association" => apply_set_association(payload),
+        "delete_association" => apply_delete_association(payload),
         _ => error!("Unknown op_type: '{}'", op_type),
     }
 }
@@ -270,4 +285,136 @@ fn apply_delete_edge(source_id: &str, payload: &Value) {
         sql_escape(relation),
     ))
     .unwrap();
+}
+
+/// UPSERT a perspective. Returns the perspective id.
+fn apply_set_perspective(payload: &Value) -> String {
+    let agent_id = payload["agent_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("set_perspective requires 'agent_id' in payload"));
+    let node_id = payload["node_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("set_perspective requires 'node_id' in payload"));
+    let weight = payload["weight"]
+        .as_f64()
+        .unwrap_or_else(|| error!("set_perspective requires 'weight' in payload"));
+
+    let ctx_sql = match payload.get("context_id").and_then(|v| v.as_str()) {
+        Some(c) => format!("'{}'::uuid", sql_escape(c)),
+        None => "NULL".to_string(),
+    };
+    let reasoning_sql = match payload.get("reasoning").and_then(|v| v.as_str()) {
+        Some(r) => format!("'{}'", sql_escape(r)),
+        None => "NULL".to_string(),
+    };
+
+    let pid = Spi::get_one::<String>(&format!(
+        "INSERT INTO kerai.perspectives (agent_id, node_id, weight, context_id, reasoning)
+         VALUES ('{}'::uuid, '{}'::uuid, {}, {}, {})
+         ON CONFLICT (agent_id, node_id, context_id)
+         DO UPDATE SET weight = EXCLUDED.weight, reasoning = EXCLUDED.reasoning, updated_at = now()
+         RETURNING id::text",
+        sql_escape(agent_id),
+        sql_escape(node_id),
+        weight,
+        ctx_sql,
+        reasoning_sql,
+    ))
+    .unwrap()
+    .unwrap();
+    pid
+}
+
+/// DELETE a perspective. Returns the agent_id.
+fn apply_delete_perspective(payload: &Value) -> String {
+    let agent_id = payload["agent_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("delete_perspective requires 'agent_id' in payload"));
+    let node_id = payload["node_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("delete_perspective requires 'node_id' in payload"));
+
+    let ctx_clause = match payload.get("context_id").and_then(|v| v.as_str()) {
+        Some(c) => format!("AND context_id = '{}'::uuid", sql_escape(c)),
+        None => "AND context_id IS NULL".to_string(),
+    };
+
+    Spi::run(&format!(
+        "DELETE FROM kerai.perspectives
+         WHERE agent_id = '{}'::uuid AND node_id = '{}'::uuid {}",
+        sql_escape(agent_id),
+        sql_escape(node_id),
+        ctx_clause,
+    ))
+    .unwrap();
+    agent_id.to_string()
+}
+
+/// UPSERT an association. Returns the association id.
+fn apply_set_association(payload: &Value) -> String {
+    let agent_id = payload["agent_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("set_association requires 'agent_id' in payload"));
+    let source_id = payload["source_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("set_association requires 'source_id' in payload"));
+    let target_id = payload["target_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("set_association requires 'target_id' in payload"));
+    let weight = payload["weight"]
+        .as_f64()
+        .unwrap_or_else(|| error!("set_association requires 'weight' in payload"));
+    let relation = payload["relation"]
+        .as_str()
+        .unwrap_or_else(|| error!("set_association requires 'relation' in payload"));
+
+    let reasoning_sql = match payload.get("reasoning").and_then(|v| v.as_str()) {
+        Some(r) => format!("'{}'", sql_escape(r)),
+        None => "NULL".to_string(),
+    };
+
+    let aid = Spi::get_one::<String>(&format!(
+        "INSERT INTO kerai.associations (agent_id, source_id, target_id, weight, relation, reasoning)
+         VALUES ('{}'::uuid, '{}'::uuid, '{}'::uuid, {}, '{}', {})
+         ON CONFLICT (agent_id, source_id, target_id, relation)
+         DO UPDATE SET weight = EXCLUDED.weight, reasoning = EXCLUDED.reasoning, updated_at = now()
+         RETURNING id::text",
+        sql_escape(agent_id),
+        sql_escape(source_id),
+        sql_escape(target_id),
+        weight,
+        sql_escape(relation),
+        reasoning_sql,
+    ))
+    .unwrap()
+    .unwrap();
+    aid
+}
+
+/// DELETE an association. Returns the agent_id.
+fn apply_delete_association(payload: &Value) -> String {
+    let agent_id = payload["agent_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("delete_association requires 'agent_id' in payload"));
+    let source_id = payload["source_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("delete_association requires 'source_id' in payload"));
+    let target_id = payload["target_id"]
+        .as_str()
+        .unwrap_or_else(|| error!("delete_association requires 'target_id' in payload"));
+    let relation = payload["relation"]
+        .as_str()
+        .unwrap_or_else(|| error!("delete_association requires 'relation' in payload"));
+
+    Spi::run(&format!(
+        "DELETE FROM kerai.associations
+         WHERE agent_id = '{}'::uuid AND source_id = '{}'::uuid
+           AND target_id = '{}'::uuid AND relation = '{}'",
+        sql_escape(agent_id),
+        sql_escape(source_id),
+        sql_escape(target_id),
+        sql_escape(relation),
+    ))
+    .unwrap();
+    agent_id.to_string()
 }
