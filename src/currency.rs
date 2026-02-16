@@ -48,6 +48,7 @@ fn register_wallet(
     }
 
     // Verify it's a valid Ed25519 public key
+    let pg_hex = bytes_to_pg_hex(&pk_bytes);
     let pk_array: [u8; 32] = pk_bytes.try_into().unwrap();
     let verifying_key = match ed25519_dalek::VerifyingKey::from_bytes(&pk_array) {
         Ok(k) => k,
@@ -55,7 +56,6 @@ fn register_wallet(
     };
 
     let fp = identity::fingerprint(&verifying_key);
-    let pg_hex = bytes_to_pg_hex(&pk_bytes);
 
     let label_sql = match label {
         Some(l) => format!("'{}'", sql_escape(l)),

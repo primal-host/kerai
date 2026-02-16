@@ -780,7 +780,8 @@ fn apply_mint_reward(payload: &Value) -> String {
     .unwrap();
 
     // Insert reward_log
-    let details = payload.get("details").unwrap_or(&Value::Object(serde_json::Map::new()));
+    let empty_obj = Value::Object(serde_json::Map::new());
+    let details = payload.get("details").unwrap_or(&empty_obj);
     let details_str = sql_escape(&details.to_string());
 
     Spi::run(&format!(
