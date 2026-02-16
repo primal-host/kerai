@@ -409,6 +409,151 @@ impl Foo {
             .unwrap();
         assert!(result.starts_with("STUB:"));
     }
+
+    // --- Plan 03: Reconstruction tests ---
+
+    /// Helper: format source through prettyplease for canonical comparison.
+    fn pretty(source: &str) -> String {
+        let parsed = syn::parse_file(source).expect("test source should parse");
+        prettyplease::unparse(&parsed)
+    }
+
+    /// Helper: parse source, then reconstruct and compare via prettyplease.
+    fn assert_roundtrip(source: &str, filename: &str) {
+        // Parse into nodes
+        Spi::run(&format!(
+            "SELECT kerai.parse_source('{}', '{}')",
+            source.replace('\'', "''"),
+            filename.replace('\'', "''"),
+        ))
+        .unwrap();
+
+        // Get the file node ID
+        let file_id = Spi::get_one::<pgrx::Uuid>(&format!(
+            "SELECT id FROM kerai.nodes WHERE kind = 'file' AND content = '{}'",
+            filename.replace('\'', "''"),
+        ))
+        .unwrap()
+        .unwrap();
+
+        // Reconstruct
+        let reconstructed = Spi::get_one::<String>(&format!(
+            "SELECT kerai.reconstruct_file('{}'::uuid)",
+            file_id,
+        ))
+        .unwrap()
+        .unwrap();
+
+        let expected = pretty(source);
+        assert_eq!(
+            reconstructed.trim(),
+            expected.trim(),
+            "Round-trip mismatch for {}",
+            filename
+        );
+    }
+
+    #[pg_test]
+    fn test_reconstruct_simple_fn() {
+        assert_roundtrip("fn hello() { let x = 1; }", "recon_simple_fn.rs");
+    }
+
+    #[pg_test]
+    fn test_reconstruct_roundtrip_struct() {
+        assert_roundtrip(
+            "#[derive(Debug, Clone)]\nstruct Point {\n    x: f64,\n    y: f64,\n}",
+            "recon_struct.rs",
+        );
+    }
+
+    #[pg_test]
+    fn test_reconstruct_const_with_value() {
+        assert_roundtrip("const MAX: u32 = 100;", "recon_const.rs");
+    }
+
+    #[pg_test]
+    fn test_reconstruct_type_alias() {
+        assert_roundtrip("type Pair = (i32, i32);", "recon_type_alias.rs");
+    }
+
+    #[pg_test]
+    fn test_reconstruct_macro_with_args() {
+        // Macros at top level — wrapped in nothing, just a macro invocation
+        assert_roundtrip("fn f() { println!(\"hello {}\", 42); }", "recon_macro.rs");
+    }
+
+    #[pg_test]
+    fn test_reconstruct_doc_comments() {
+        assert_roundtrip(
+            "/// This is documented\nfn documented() {}",
+            "recon_doc.rs",
+        );
+    }
+
+    #[pg_test]
+    fn test_reconstruct_impl_block() {
+        assert_roundtrip(
+            "struct Foo;\nimpl Foo {\n    fn bar(&self) -> i32 { 42 }\n    const X: i32 = 1;\n    type Out = String;\n}",
+            "recon_impl.rs",
+        );
+    }
+
+    #[pg_test]
+    #[should_panic(expected = "Node not found")]
+    fn test_reconstruct_nonexistent_node() {
+        Spi::get_one::<String>(
+            "SELECT kerai.reconstruct_file('00000000-0000-0000-0000-000000000000'::uuid)",
+        )
+        .unwrap();
+    }
+
+    #[pg_test]
+    #[should_panic(expected = "expected 'file'")]
+    fn test_reconstruct_wrong_node_kind() {
+        // Parse something first to get a non-file node
+        Spi::run("SELECT kerai.parse_source('fn f() {}', 'recon_wrong_kind.rs')")
+            .unwrap();
+
+        let fn_id = Spi::get_one::<pgrx::Uuid>(
+            "SELECT id FROM kerai.nodes WHERE kind = 'fn' AND content = 'f' LIMIT 1",
+        )
+        .unwrap()
+        .unwrap();
+
+        Spi::get_one::<String>(&format!(
+            "SELECT kerai.reconstruct_file('{}'::uuid)",
+            fn_id
+        ))
+        .unwrap();
+    }
+
+    #[pg_test]
+    fn test_reconstruct_complex_roundtrip() {
+        let source = "\
+use std::collections::HashMap;
+
+const VERSION: &str = \"1.0\";
+
+fn compute(x: i32, y: i32) -> i32 {
+    x + y
+}
+
+#[derive(Debug)]
+struct Config {
+    name: String,
+    values: HashMap<String, i32>,
+}
+
+impl Config {
+    fn new(name: String) -> Self {
+        Config {
+            name,
+            values: HashMap::new(),
+        }
+    }
+}";
+        assert_roundtrip(source, "recon_complex.rs");
+    }
 }
 
 #[cfg(test)]
