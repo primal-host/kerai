@@ -1,12 +1,15 @@
 pub mod checkout;
 pub mod commit;
+pub mod find;
 pub mod info;
 pub mod init;
 pub mod log;
 pub mod peer;
 pub mod ping;
 pub mod query;
+pub mod refs;
 pub mod sync;
+pub mod tree;
 pub mod version;
 
 use crate::config;
@@ -48,6 +51,17 @@ pub enum Command {
     },
     Sync {
         peer: String,
+    },
+    Find {
+        pattern: String,
+        kind: Option<String>,
+        limit: Option<i32>,
+    },
+    Refs {
+        symbol: String,
+    },
+    Tree {
+        path: Option<String>,
     },
 }
 
@@ -93,5 +107,12 @@ pub fn run(
         Command::PeerRemove { name } => peer::remove(&mut client, &name),
         Command::PeerInfo { name } => peer::info(&mut client, &name, format),
         Command::Sync { peer } => sync::run(&mut client, &peer),
+        Command::Find {
+            pattern,
+            kind,
+            limit,
+        } => find::run(&mut client, &pattern, kind.as_deref(), limit, format),
+        Command::Refs { symbol } => refs::run(&mut client, &symbol, format),
+        Command::Tree { path } => tree::run(&mut client, path.as_deref(), format),
     }
 }

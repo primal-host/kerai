@@ -84,6 +84,32 @@ enum CliCommand {
         /// Peer name to sync with
         peer: String,
     },
+
+    /// Search AST nodes by content pattern
+    Find {
+        /// Search pattern (ILIKE syntax, e.g. %hello%)
+        pattern: String,
+
+        /// Filter by node kind (e.g. fn, struct, enum)
+        #[arg(long)]
+        kind: Option<String>,
+
+        /// Maximum results (default 50)
+        #[arg(long)]
+        limit: Option<i32>,
+    },
+
+    /// Find definitions, references, and impls for a symbol
+    Refs {
+        /// Symbol name to search for
+        symbol: String,
+    },
+
+    /// Show AST tree structure
+    Tree {
+        /// ltree path pattern (subtree or lquery with wildcards)
+        path: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -151,6 +177,17 @@ fn main() {
             PeerAction::Info { name } => commands::Command::PeerInfo { name },
         },
         CliCommand::Sync { peer } => commands::Command::Sync { peer },
+        CliCommand::Find {
+            pattern,
+            kind,
+            limit,
+        } => commands::Command::Find {
+            pattern,
+            kind,
+            limit,
+        },
+        CliCommand::Refs { symbol } => commands::Command::Refs { symbol },
+        CliCommand::Tree { path } => commands::Command::Tree { path },
     };
 
     if let Err(e) = commands::run(command, &cli.profile, cli.db.as_deref(), &cli.format) {
