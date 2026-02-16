@@ -2,7 +2,7 @@
 
 AST-based version control backed by Postgres, using CRDTs for conflict-free convergence, with cryptographic identity and a built-in knowledge economy.
 
-From 家来 (kerai) — Japanese for retainer or servant. AI agents that loyally serve developers.
+From 家来 (kerai) — Japanese for "staff." AI agents that work alongside developers.
 
 ## Status
 
