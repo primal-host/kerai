@@ -4,6 +4,7 @@ use serde_json::json;
 
 mod assembler;
 mod formatter;
+mod markdown;
 
 /// Reconstruct a Rust source file from its stored AST nodes.
 /// Takes the UUID of a file-kind node and returns formatted Rust source.
