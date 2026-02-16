@@ -1,0 +1,24 @@
+services:
+  kerai-web:
+    image: primal-host-infra-kerai-web
+    container_name: infra-kerai-web
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    environment:
+      - DATABASE_URL=host=host.docker.internal dbname=kerai
+      - LISTEN_ADDR=0.0.0.0:3000
+      - STATIC_DIR=/srv/static
+    networks:
+      - infra
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.kerai-editor.rule=Host(`editor.localhost`) || Host(`editor.primal.host`)"
+      - "traefik.http.routers.kerai-editor.entrypoints=websecure"
+      - "traefik.http.routers.kerai-editor.tls.certresolver=letsencrypt"
+      - "traefik.http.services.kerai-editor.loadbalancer.server.port=3000"
+    restart: unless-stopped
+
+networks:
+  infra:
+    external: true
