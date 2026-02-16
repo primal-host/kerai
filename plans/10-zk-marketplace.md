@@ -14,7 +14,7 @@ Private knowledge is a temporary state. In a system with vast compute, independe
 1. Knowledge starts private (valuable, scarce)
 2. It's attested and auctioned (provably real, price dropping)
 3. Buyers pay for early access (competitive advantage)
-4. The price hits floor → knowledge goes open to the entire network (joins the commons)
+4. The price hits floor → knowledge goes open to the entire network (joins the Koi Pond)
 
 The auction determines *how long* knowledge stays private and *how much* the producer is compensated. Not *whether* it eventually becomes public — that's a given.
 
@@ -81,7 +81,7 @@ OR:
 
 Hour 80: current_price = 0 (floor hit, no settlement)
   → Knowledge released to entire network for free.
-  → Seller receives 0 kōi but knowledge enters the commons.
+  → Seller receives 0 kōi but knowledge enters the Koi Pond.
 ```
 
 ### 10.2 Settlement and Simultaneous Release
@@ -104,10 +104,10 @@ When knowledge goes open (floor hit or post-settlement delay):
 2. Any instance can sync the data via the normal CRDT operation exchange (Plan 06)
 3. The attestation is marked `open_sourced = true`
 4. Ledger records the event as a mint with `reason = 'open_source_release'` and `amount = 0`
-5. The data is now part of the commons — it syncs freely via normal distribution mechanisms
+5. The data is now part of the Koi Pond — it syncs freely via normal distribution mechanisms
 
 ```bash
-# Query the open knowledge commons
+# Browse the Koi Pond (open-sourced knowledge)
 kerai market browse --open-sourced --scope "pkg.auth.*"
 
 # Sync open-sourced knowledge from the network
@@ -189,7 +189,7 @@ kerai market status <auction-id>
 # View your instance's earnings and spending
 kerai market balance
 
-# View the knowledge commons (open-sourced knowledge)
+# Browse the Koi Pond
 kerai market commons [--scope path] [--since date]
 
 # Market statistics
@@ -219,7 +219,7 @@ This is the point where AI agents participate on both sides of the market — pr
 
 **For sellers:** Set starting price based on reproduction cost estimate. Set floor based on how quickly you think independent discovery will happen. The market corrects bad estimates — if nobody bids, your reproduction estimate was too optimistic and you should lower prices. If the auction settles quickly at a high price, you underestimated the value.
 
-**For the network:** Every auction resolves in one of two ways — either buyers pay and receive the knowledge (and it goes open shortly after), or the floor is hit and it goes open for free. Either way, the knowledge enters the commons. The only question is whether the producer gets compensated first. Over time, the commons grows monotonically. The network gets richer with every auction, whether it settles or not.
+**For the network:** Every auction resolves in one of two ways — either buyers pay and receive the knowledge (and it goes open shortly after), or the floor is hit and it goes open for free. Either way, the knowledge enters the Koi Pond. The only question is whether the producer gets compensated first. Over time, the Koi Pond grows monotonically. The network gets richer with every auction, whether it settles or not.
 
 **The open-source floor creates a natural pressure toward generosity.** An instance sitting on knowledge and pricing it too high watches the clock tick down toward free. Better to settle at a reasonable price than receive nothing when the floor hits. This keeps the market efficient and prevents knowledge hoarding.
 
