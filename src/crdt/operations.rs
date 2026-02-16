@@ -27,6 +27,9 @@ const VALID_OP_TYPES: &[&str] = &[
     "transfer_koi",
     "create_bounty",
     "update_bounty_status",
+    "register_wallet",
+    "signed_transfer",
+    "mint_reward",
 ];
 
 /// Validate that op_type is known and node_id requirements are met.
@@ -48,6 +51,9 @@ pub fn validate_op(op_type: &str, node_id: Option<&str>, _payload: &Value) {
         "transfer_koi",
         "create_bounty",
         "update_bounty_status",
+        "register_wallet",
+        "signed_transfer",
+        "mint_reward",
     ];
     if !no_node_id_ops.contains(&op_type) && node_id.is_none() {
         error!("op_type '{}' requires a node_id", op_type);
@@ -104,6 +110,9 @@ pub fn apply(
         "transfer_koi" => apply_transfer_koi(payload),
         "create_bounty" => apply_create_bounty(payload),
         "update_bounty_status" => apply_update_bounty_status(payload),
+        "register_wallet" => apply_register_wallet(payload),
+        "signed_transfer" => apply_signed_transfer(payload),
+        "mint_reward" => apply_mint_reward(payload),
         _ => error!("Unknown op_type: '{}'", op_type),
     }
 }
@@ -655,4 +664,134 @@ fn apply_update_bounty_status(payload: &Value) -> String {
     ))
     .unwrap();
     bounty_id.to_string()
+}
+
+/// INSERT a wallet via register_wallet (client-side key). Returns wallet UUID.
+fn apply_register_wallet(payload: &Value) -> String {
+    let public_key_hex = payload["public_key_hex"]
+        .as_str()
+        .unwrap_or_else(|| error!("register_wallet requires 'public_key_hex' in payload"));
+    let wallet_type = payload["wallet_type"]
+        .as_str()
+        .unwrap_or_else(|| error!("register_wallet requires 'wallet_type' in payload"));
+    let fingerprint = payload["fingerprint"]
+        .as_str()
+        .unwrap_or_else(|| error!("register_wallet requires 'fingerprint' in payload"));
+
+    let label_sql = match payload.get("label").and_then(|v| v.as_str()) {
+        Some(l) => format!("'{}'", sql_escape(l)),
+        None => "NULL".to_string(),
+    };
+
+    let wallet_id = Spi::get_one::<String>(&format!(
+        "INSERT INTO kerai.wallets (public_key, key_fingerprint, wallet_type, label)
+         VALUES ('\\x{}'::bytea, '{}', '{}', {})
+         RETURNING id::text",
+        sql_escape(public_key_hex),
+        sql_escape(fingerprint),
+        sql_escape(wallet_type),
+        label_sql,
+    ))
+    .unwrap()
+    .unwrap();
+    wallet_id
+}
+
+/// Signed transfer via CRDT replication. Verifies signature and inserts ledger entry.
+fn apply_signed_transfer(payload: &Value) -> String {
+    let from_wallet = payload["from_wallet"]
+        .as_str()
+        .unwrap_or_else(|| error!("signed_transfer requires 'from_wallet' in payload"));
+    let to_wallet = payload["to_wallet"]
+        .as_str()
+        .unwrap_or_else(|| error!("signed_transfer requires 'to_wallet' in payload"));
+    let amount = payload["amount"]
+        .as_i64()
+        .unwrap_or_else(|| error!("signed_transfer requires 'amount' in payload"));
+    let reason = payload["reason"]
+        .as_str()
+        .unwrap_or("signed_transfer");
+    let timestamp = payload["timestamp"]
+        .as_i64()
+        .unwrap_or_else(|| error!("signed_transfer requires 'timestamp' in payload"));
+    let nonce = payload["nonce"]
+        .as_i64()
+        .unwrap_or_else(|| error!("signed_transfer requires 'nonce' in payload"));
+
+    let sig_sql = match payload.get("signature_hex").and_then(|v| v.as_str()) {
+        Some(s) => format!("'\\x{}'::bytea", sql_escape(s)),
+        None => "NULL".to_string(),
+    };
+
+    // Insert ledger entry
+    let ledger_id = Spi::get_one::<String>(&format!(
+        "INSERT INTO kerai.ledger (from_wallet, to_wallet, amount, reason, signature, timestamp)
+         VALUES ('{}'::uuid, '{}'::uuid, {}, '{}', {}, {})
+         RETURNING id::text",
+        sql_escape(from_wallet),
+        sql_escape(to_wallet),
+        amount,
+        sql_escape(reason),
+        sig_sql,
+        timestamp,
+    ))
+    .unwrap()
+    .unwrap();
+
+    // Update nonce
+    Spi::run(&format!(
+        "UPDATE kerai.wallets SET nonce = {} WHERE id = '{}'::uuid",
+        nonce,
+        sql_escape(from_wallet),
+    ))
+    .unwrap();
+
+    ledger_id
+}
+
+/// Mint reward via CRDT replication. Inserts ledger mint + reward_log entry.
+fn apply_mint_reward(payload: &Value) -> String {
+    let to_wallet = payload["to_wallet"]
+        .as_str()
+        .unwrap_or_else(|| error!("mint_reward requires 'to_wallet' in payload"));
+    let amount = payload["amount"]
+        .as_i64()
+        .unwrap_or_else(|| error!("mint_reward requires 'amount' in payload"));
+    let work_type = payload["work_type"]
+        .as_str()
+        .unwrap_or_else(|| error!("mint_reward requires 'work_type' in payload"));
+    let timestamp = payload["timestamp"]
+        .as_i64()
+        .unwrap_or_else(|| error!("mint_reward requires 'timestamp' in payload"));
+
+    let reason = format!("reward:{}", work_type);
+
+    // Insert ledger entry (mint: from_wallet = NULL)
+    let ledger_id = Spi::get_one::<String>(&format!(
+        "INSERT INTO kerai.ledger (from_wallet, to_wallet, amount, reason, timestamp)
+         VALUES (NULL, '{}'::uuid, {}, '{}', {})
+         RETURNING id::text",
+        sql_escape(to_wallet),
+        amount,
+        sql_escape(&reason),
+        timestamp,
+    ))
+    .unwrap()
+    .unwrap();
+
+    // Insert reward_log
+    let details = payload.get("details").unwrap_or(&Value::Object(serde_json::Map::new()));
+    let details_str = sql_escape(&details.to_string());
+
+    Spi::run(&format!(
+        "INSERT INTO kerai.reward_log (work_type, reward, wallet_id, details)
+         VALUES ('{}', {}, '{}'::uuid, '{}'::jsonb)",
+        sql_escape(work_type),
+        amount,
+        sql_escape(to_wallet),
+        details_str,
+    ))
+    .unwrap();
+
+    ledger_id
 }
