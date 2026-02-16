@@ -576,7 +576,8 @@ INSERT INTO kerai.reward_schedule (work_type, reward) VALUES
     ('parse_markdown', 10),
     ('create_version', 5),
     ('bounty_settlement', 20),
-    ('peer_sync', 15);
+    ('peer_sync', 15),
+    ('model_training', 25);
 "#,
     name = "seed_reward_schedule",
     requires = ["table_reward_schedule"]
