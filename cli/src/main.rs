@@ -158,7 +158,7 @@ enum CliCommand {
         action: SwarmAction,
     },
 
-    /// Knowledge marketplace — auctions, bids, commons
+    /// Knowledge marketplace — auctions, bids, Koi Pond
     Market {
         #[command(subcommand)]
         action: MarketAction,
@@ -362,7 +362,7 @@ enum MarketAction {
     /// Show marketplace earnings and spending
     Balance,
 
-    /// Browse open-sourced knowledge
+    /// Browse the Koi Pond (open-sourced knowledge)
     Commons {
         /// Filter by scope (ltree path)
         #[arg(long)]

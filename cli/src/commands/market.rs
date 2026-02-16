@@ -223,7 +223,7 @@ pub fn commons(
     let arr = value.as_array().ok_or("Expected JSON array")?;
 
     if arr.is_empty() {
-        println!("No open-sourced knowledge found.");
+        println!("The Koi Pond is empty.");
         return Ok(());
     }
 

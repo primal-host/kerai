@@ -531,7 +531,7 @@ fn market_balance() -> pgrx::JsonB {
     }))
 }
 
-/// Browse open-sourced knowledge in the commons.
+/// Browse open-sourced knowledge in the Koi Pond.
 #[pg_extern]
 fn market_commons(scope_filter: Option<&str>, since: Option<&str>) -> pgrx::JsonB {
     let mut conditions = vec!["au.open_sourced = true".to_string()];
