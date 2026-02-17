@@ -27,6 +27,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 │  14 Native Currency ←──── 01
 │  15 Comment Handling ←─── 02 + 03
 │  16 Reconstruction Intelligence ← 02 + 03 + 15
+│  17 Go Language Support ← 02 + 15
 ```
 
 | Plan | Title | Depends On | Delivers |
@@ -47,6 +48,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 | [14](14-native-currency.md) | Native Currency | 01 | Kōi token minting, wallets, transfers, reward schedules |
 | [15](15-comment-handling.md) | Comment Handling | 02, 03 | Source normalizer, comment grouping, placement classification, string-literal exclusion, comment-preserving reconstruction |
 | [16](16-reconstruction-intelligence.md) | Reconstruction Intelligence | 02, 03, 15 | Import sorting, derive ordering, inline `// kerai:` suggestions with dismissal tracking |
+| [17](17-go-language.md) | Go Language Support | 02, 15 | Parse Go source via tree-sitter, Go kinds, suggestion rules, reconstruction |
 
 ## Design Principles
 
