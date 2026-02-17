@@ -1,6 +1,7 @@
-/// Extension-based language classification for repository files.
+// Extension-based language classification for repository files.
 
 /// Languages that have a kerai parser.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseableLanguage {
     Rust,

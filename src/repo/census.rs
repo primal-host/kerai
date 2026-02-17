@@ -26,8 +26,8 @@ pub fn repo_census(repo_node_id: &str) -> Value {
             )
             SELECT
                 COALESCE(language, 'unknown') AS lang,
-                COUNT(*) AS file_count,
-                SUM(COALESCE((metadata->>'line_count')::bigint, 0)) AS line_count
+                COUNT(*)::bigint AS file_count,
+                COALESCE(SUM(COALESCE((metadata->>'line_count')::bigint, 0)), 0)::bigint AS line_count
             FROM descendants
             WHERE kind IN ('file', 'repo_opaque_text')
             GROUP BY language
@@ -70,7 +70,7 @@ pub fn repo_census(repo_node_id: &str) -> Value {
                 SELECT n.id, n.kind FROM kerai.nodes n
                 JOIN descendants d ON n.parent_id = d.id
             )
-            SELECT COUNT(*) AS cnt FROM descendants
+            SELECT COUNT(*)::bigint AS cnt FROM descendants
             WHERE kind = 'repo_opaque_binary'",
         );
 

@@ -268,8 +268,15 @@ fn drop_repo(repo_id: pgrx::Uuid) -> pgrx::JsonB {
 
     let node_id = node_id.unwrap_or_else(|| pgrx::error!("Repository not found: {}", repo_id_str));
 
-    // Delete all nodes and edges under the repo root via recursive CTE
+    // Delete repository record first (FK references node_id)
     let n_id = sql_uuid(&node_id);
+    Spi::run(&format!(
+        "DELETE FROM kerai.repositories WHERE id = {}",
+        sql_uuid(&repo_id_str),
+    ))
+    .ok();
+
+    // Delete all edges under the repo root via recursive CTE
     Spi::run(&format!(
         "WITH RECURSIVE descendants AS (
             SELECT id FROM kerai.nodes WHERE id = {n_id}
@@ -282,6 +289,7 @@ fn drop_repo(repo_id: pgrx::Uuid) -> pgrx::JsonB {
     ))
     .ok();
 
+    // Delete all nodes under the repo root
     let deleted = Spi::get_one::<i64>(&format!(
         "WITH RECURSIVE descendants AS (
             SELECT id FROM kerai.nodes WHERE id = {n_id}
@@ -292,17 +300,10 @@ fn drop_repo(repo_id: pgrx::Uuid) -> pgrx::JsonB {
         deleted AS (
             DELETE FROM kerai.nodes WHERE id IN (SELECT id FROM descendants) RETURNING 1
         )
-        SELECT count(*) FROM deleted",
+        SELECT count(*)::bigint FROM deleted",
     ))
     .unwrap()
     .unwrap_or(0);
-
-    // Delete repository record
-    Spi::run(&format!(
-        "DELETE FROM kerai.repositories WHERE id = {}",
-        sql_uuid(&repo_id_str),
-    ))
-    .ok();
 
     // Remove local clone directory
     if let Some(path) = local_path {

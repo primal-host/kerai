@@ -39,10 +39,10 @@ tree-sitter = "0.24"
 tree-sitter-go = "0.23"
 tree-sitter-c = "0.23"
 git2 = "0.19"
+tempfile = "3"
 
 [dev-dependencies]
 pgrx-tests = "=0.17.0"
-tempfile = "3"
 
 [lints.clippy]
 unwrap_used = "warn"

@@ -29,6 +29,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 │  16 Reconstruction Intelligence ← 02 + 03 + 15
 │  17 Go Language Support ← 02 + 15
 │  18 C Language Support ← 02 + 15 + 17
+│  19 Repository Ingestion ← 02 + 15 + 17 + 18
 ```
 
 | Plan | Title | Depends On | Delivers |
@@ -51,6 +52,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 | [16](16-reconstruction-intelligence.md) | Reconstruction Intelligence | 02, 03, 15 | Import sorting, derive ordering, inline `// kerai:` suggestions with dismissal tracking |
 | [17](17-go-language.md) | Go Language Support | 02, 15 | Parse Go source via tree-sitter, Go kinds, suggestion rules, reconstruction |
 | [18](18-c-language.md) | C Language Support | 02, 15, 17 | Parse C source via tree-sitter, C kinds, declarator unwrapping, suggestion rules, reconstruction |
+| [19](19-repository-ingestion.md) | Repository Ingestion | 02, 15, 17, 18 | git2-based clone/fetch, commit graph, multi-language file tree, opaque fallback, language census, incremental mirror |
 
 ## Design Principles
 
