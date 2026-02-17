@@ -636,3 +636,15 @@ fn collect_string_spans_recursive(
         collect_string_spans_recursive(&child, source, spans);
     }
 }
+
+// Public wrappers for use by the metadata module.
+
+/// Public wrapper for `unwrap_declarator_name`.
+pub fn unwrap_declarator_name_pub(node: &tree_sitter::Node, source: &str) -> Option<String> {
+    unwrap_declarator_name(node, source)
+}
+
+/// Public wrapper for `has_storage_class`.
+pub fn has_storage_class_pub(node: &tree_sitter::Node, source: &str, class: &str) -> bool {
+    has_storage_class(node, source, class)
+}
