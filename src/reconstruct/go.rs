@@ -2,7 +2,6 @@
 use pgrx::prelude::*;
 use serde_json::json;
 
-use crate::parser::go::kinds as go_kinds;
 use crate::parser::kinds::Kind;
 use crate::sql::sql_escape;
 
