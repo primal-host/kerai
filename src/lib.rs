@@ -4010,6 +4010,279 @@ func ExportedNoDoc() {}
         assert!(suggestion > 0, "Exported function without doc should trigger suggestion");
     }
 
+    // ── C parser tests ───────────────────────────────────────────────────
+
+    #[pg_test]
+    fn test_parse_c_source_basic() {
+        let source = r#"#include <stdio.h>
+
+int main(void) {
+    printf("hello\n");
+    return 0;
+}
+"#;
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.parse_c_source('{}', 'hello.c')",
+            sql_escape(source),
+        ))
+        .unwrap()
+        .unwrap();
+
+        let nodes = result.0.get("nodes").and_then(|v| v.as_u64()).unwrap_or(0);
+        assert!(nodes > 0, "parse_c_source should produce nodes, got {}", nodes);
+    }
+
+    #[pg_test]
+    fn test_c_function_node_kind() {
+        let source = r#"int main(void) {
+    return 0;
+}
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'func_kind.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'c_function' AND content = 'main'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+
+        assert_eq!(count, 1, "Should have one c_function node named main");
+    }
+
+    #[pg_test]
+    fn test_c_static_metadata() {
+        let source = r#"static int helper(int x) {
+    return x * 2;
+}
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'static_test.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let is_static = Spi::get_one::<bool>(
+            "SELECT (metadata->>'static')::boolean FROM kerai.nodes \
+             WHERE kind = 'c_function' AND content = 'helper'",
+        )
+        .unwrap()
+        .unwrap_or(false);
+
+        assert!(is_static, "static function should have static=true metadata");
+    }
+
+    #[pg_test]
+    fn test_c_struct_fields() {
+        let source = r#"struct Point {
+    int x;
+    int y;
+    int z;
+};
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'struct_test.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let field_count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'c_field' AND language = 'c'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+
+        assert_eq!(field_count, 3, "Struct should have 3 fields, got {}", field_count);
+    }
+
+    #[pg_test]
+    fn test_c_enum_enumerators() {
+        let source = r#"enum Color { RED, GREEN, BLUE };
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'enum_test.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'c_enumerator' AND language = 'c'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+
+        assert_eq!(count, 3, "Enum should have 3 enumerators, got {}", count);
+    }
+
+    #[pg_test]
+    fn test_c_include_metadata() {
+        let source = r#"#include <stdio.h>
+#include "myheader.h"
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'include_test.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let system = Spi::get_one::<bool>(
+            "SELECT (metadata->>'system')::boolean FROM kerai.nodes \
+             WHERE kind = 'c_include' AND metadata->>'path' LIKE '%stdio.h%'",
+        )
+        .unwrap()
+        .unwrap_or(false);
+
+        assert!(system, "#include <stdio.h> should have system=true");
+
+        let user_include = Spi::get_one::<bool>(
+            "SELECT (metadata->>'system')::boolean FROM kerai.nodes \
+             WHERE kind = 'c_include' AND metadata->>'path' LIKE '%myheader.h%'",
+        )
+        .unwrap()
+        .unwrap_or(true);
+
+        assert!(!user_include, "#include \"myheader.h\" should have system=false");
+    }
+
+    #[pg_test]
+    fn test_c_define_metadata() {
+        let source = r#"#define MAX_SIZE 100
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'define_test.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let name = Spi::get_one::<String>(
+            "SELECT metadata->>'name' FROM kerai.nodes \
+             WHERE kind = 'c_define' AND language = 'c'",
+        )
+        .unwrap()
+        .unwrap_or_default();
+
+        assert_eq!(name, "MAX_SIZE", "Define should have name=MAX_SIZE");
+
+        let value = Spi::get_one::<String>(
+            "SELECT metadata->>'value' FROM kerai.nodes \
+             WHERE kind = 'c_define' AND language = 'c'",
+        )
+        .unwrap()
+        .unwrap_or_default();
+
+        assert_eq!(value, "100", "Define should have value=100");
+    }
+
+    #[pg_test]
+    fn test_c_comment_documents_edge() {
+        let source = r#"// Calculate the sum of two integers.
+int add(int a, int b) {
+    return a + b;
+}
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'comment_edge.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let doc_edge = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.edges e \
+             JOIN kerai.nodes t ON e.target_id = t.id \
+             WHERE e.relation = 'documents' \
+             AND t.kind = 'c_function' AND t.content = 'add'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+
+        assert_eq!(doc_edge, 1, "Comment above add should create 'documents' edge");
+    }
+
+    #[pg_test]
+    fn test_c_pointer_function() {
+        let source = r#"int *foo(int x) {
+    return &x;
+}
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'pointer_func.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'c_function' AND content = 'foo'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+
+        assert_eq!(count, 1, "Should unwrap pointer declarator to find name 'foo'");
+    }
+
+    #[pg_test]
+    fn test_c_reconstruct_roundtrip() {
+        let source = r#"#include <stdio.h>
+
+// A simple function
+int add(int a, int b) {
+    return a + b;
+}
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'roundtrip.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let file_id = Spi::get_one::<String>(
+            "SELECT id::text FROM kerai.nodes \
+             WHERE kind = 'file' AND content = 'roundtrip.c' AND language = 'c'",
+        )
+        .unwrap()
+        .unwrap();
+
+        let reconstructed = Spi::get_one::<String>(&format!(
+            "SELECT kerai.reconstruct_c_file('{}'::uuid)",
+            sql_escape(&file_id),
+        ))
+        .unwrap()
+        .unwrap();
+
+        assert!(
+            reconstructed.contains("#include"),
+            "Reconstructed should contain include directive"
+        );
+        assert!(
+            reconstructed.contains("int add"),
+            "Reconstructed should contain add function"
+        );
+    }
+
+    #[pg_test]
+    fn test_c_typedef() {
+        let source = r#"typedef struct {
+    int x;
+    int y;
+} Point;
+"#;
+        Spi::run(&format!(
+            "SELECT kerai.parse_c_source('{}', 'typedef_test.c')",
+            sql_escape(source),
+        ))
+        .unwrap();
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'c_typedef' AND content = 'Point'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+
+        assert_eq!(count, 1, "Should have one c_typedef node named Point");
+    }
+
     /// sql_escape helper for tests
     fn sql_escape(s: &str) -> String {
         s.replace('\'', "''")
