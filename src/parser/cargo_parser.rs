@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 use uuid::Uuid;
 
-use super::kinds;
+use super::kinds::Kind;
 use super::path_builder::PathContext;
 
 /// A row to be inserted into kerai.nodes.
@@ -57,7 +57,7 @@ pub fn parse_cargo_toml(
     nodes.push(NodeRow {
         id: crate_id.clone(),
         instance_id: instance_id.to_string(),
-        kind: kinds::CRATE.to_string(),
+        kind: Kind::Crate.as_str().to_string(),
         language: Some("rust".to_string()),
         content: Some(crate_name.clone()),
         parent_id: None,
@@ -73,7 +73,7 @@ pub fn parse_cargo_toml(
     nodes.push(NodeRow {
         id: cargo_node_id.clone(),
         instance_id: instance_id.to_string(),
-        kind: kinds::CARGO_TOML.to_string(),
+        kind: Kind::CargoToml.as_str().to_string(),
         language: Some("toml".to_string()),
         content: Some("Cargo.toml".to_string()),
         parent_id: Some(crate_id.clone()),
@@ -121,7 +121,7 @@ pub fn parse_cargo_toml(
             nodes.push(NodeRow {
                 id: dep_id,
                 instance_id: instance_id.to_string(),
-                kind: kinds::DEPENDENCY.to_string(),
+                kind: Kind::Dependency.as_str().to_string(),
                 language: None,
                 content: Some(dep_name.clone()),
                 parent_id: Some(cargo_node_id.clone()),
@@ -157,7 +157,7 @@ pub fn parse_cargo_toml(
             nodes.push(NodeRow {
                 id: dep_id,
                 instance_id: instance_id.to_string(),
-                kind: kinds::DEPENDENCY.to_string(),
+                kind: Kind::Dependency.as_str().to_string(),
                 language: None,
                 content: Some(dep_name.clone()),
                 parent_id: Some(cargo_node_id.clone()),

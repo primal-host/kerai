@@ -23,6 +23,7 @@ pub mod markdown;
 
 use ast_walker::NodeRow;
 use comment_extractor::{CommentBlock, CommentPlacement};
+use kinds::Kind;
 use path_builder::PathContext;
 
 /// Get the self instance ID from the database.
@@ -219,7 +220,7 @@ fn parse_single_file(
     let file_node = NodeRow {
         id: file_node_id.clone(),
         instance_id: instance_id.to_string(),
-        kind: kinds::FILE.to_string(),
+        kind: Kind::File.as_str().to_string(),
         language: Some("rust".to_string()),
         content: Some(filename.to_string()),
         parent_id: parent_id.map(|s| s.to_string()),
@@ -265,9 +266,9 @@ fn parse_single_file(
     for (block_idx, block) in blocks.iter().enumerate() {
         let comment_id = Uuid::new_v4().to_string();
         let kind = if !block.is_block_style && block.lines.len() > 1 {
-            kinds::COMMENT_BLOCK
+            Kind::CommentBlock
         } else {
-            kinds::COMMENT
+            Kind::Comment
         };
         let style = if block.is_block_style { "block" } else { "line" };
         let placement = match block.placement {
@@ -282,7 +283,7 @@ fn parse_single_file(
         nodes.push(NodeRow {
             id: comment_id.clone(),
             instance_id: instance_id.to_string(),
-            kind: kind.to_string(),
+            kind: kind.as_str().to_string(),
             language: Some("rust".to_string()),
             content: Some(content),
             parent_id: Some(file_node_id.clone()),
@@ -335,8 +336,8 @@ fn match_comments_to_ast(
         .iter()
         .filter(|n| {
             n.span_start.is_some()
-                && n.kind != kinds::COMMENT
-                && n.kind != kinds::COMMENT_BLOCK
+                && n.kind != Kind::Comment.as_str()
+                && n.kind != Kind::CommentBlock.as_str()
         })
         .map(|n| (n.span_start.unwrap(), n.id.as_str()))
         .collect();
