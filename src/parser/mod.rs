@@ -1,6 +1,7 @@
 /// Parser module — Rust source → kerai.nodes + kerai.edges.
 use pgrx::prelude::*;
 use serde_json::json;
+use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 use uuid::Uuid;
@@ -10,6 +11,7 @@ mod cargo_parser;
 #[allow(dead_code)]
 mod comment_extractor;
 mod crate_walker;
+mod flag_parser;
 #[allow(dead_code)]
 mod inserter;
 pub mod kinds;
@@ -19,6 +21,7 @@ mod normalizer;
 #[allow(dead_code)]
 mod path_builder;
 pub mod markdown;
+mod suggestion_rules;
 
 use ast_walker::NodeRow;
 use comment_extractor::{CommentBlock, CommentPlacement};
@@ -203,6 +206,27 @@ fn parse_single_file(
     // 1. Normalize source
     let normalized = normalizer::normalize(source);
 
+    // 1b. Parse kerai directives (flags + suggestion acknowledgments)
+    let directives = flag_parser::parse_kerai_directives(&normalized);
+    let kerai_flags = flag_parser::build_flags_metadata(&directives);
+
+    // Collect suggestion comments from previous reconstruction cycle
+    let prev_suggestions: Vec<_> = directives
+        .iter()
+        .filter_map(|d| {
+            if let flag_parser::KeraiDirective::SuggestionComment {
+                rule_id,
+                message: _,
+                line,
+            } = d
+            {
+                Some((rule_id.clone(), *line))
+            } else {
+                None
+            }
+        })
+        .collect();
+
     // 2. Parse with syn
     let syn_file = match syn::parse_file(&normalized) {
         Ok(f) => f,
@@ -212,9 +236,17 @@ fn parse_single_file(
         }
     };
 
-    // 3. Create file node
+    // 3. Create file node (with kerai_flags if present)
     let file_node_id = Uuid::new_v4().to_string();
     let path_ctx = PathContext::with_root(path_root);
+
+    let mut file_metadata = json!({"line_count": normalized.lines().count()});
+    if let Some(ref flags) = kerai_flags {
+        file_metadata
+            .as_object_mut()
+            .unwrap()
+            .insert("kerai_flags".to_string(), flags.clone());
+    }
 
     let file_node = NodeRow {
         id: file_node_id.clone(),
@@ -225,7 +257,7 @@ fn parse_single_file(
         parent_id: parent_id.map(|s| s.to_string()),
         position,
         path: path_ctx.path(),
-        metadata: json!({"line_count": normalized.lines().count()}),
+        metadata: file_metadata,
         span_start: None,
         span_end: None,
     };
@@ -257,6 +289,13 @@ fn parse_single_file(
 
     // Filter out doc comments (already handled via syn attributes)
     blocks.retain(|b| !b.is_doc);
+
+    // Also filter out kerai directive comments (flags and suggestion acks)
+    blocks.retain(|b| {
+        let first_line = b.lines.first().map(|l| l.as_str()).unwrap_or("");
+        !first_line.starts_with(" kerai:")
+            && !first_line.starts_with("kerai:")
+    });
 
     // 8. Match comment blocks to AST nodes (sets placement)
     let matches = match_comments_to_ast(&mut blocks, &nodes);
@@ -312,6 +351,117 @@ fn parse_single_file(
         }
     }
 
+    // 10. Run suggestion rules
+    let skip_suggestions = kerai_flags
+        .as_ref()
+        .and_then(|f| f.get("skip-suggestions").and_then(|v| v.as_bool()))
+        .unwrap_or(false)
+        || kerai_flags
+            .as_ref()
+            .and_then(|f| f.get("skip").and_then(|v| v.as_bool()))
+            .unwrap_or(false);
+
+    if !skip_suggestions {
+        // Build NodeInfo for suggestion rules from AST-walked nodes
+        let node_infos: Vec<suggestion_rules::NodeInfo> = nodes
+            .iter()
+            .filter(|n| n.parent_id.as_deref() == Some(&file_node_id))
+            .map(|n| {
+                let name = n
+                    .metadata
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| {
+                        // For nodes that store name in content (fns, structs, etc.)
+                        if matches!(
+                            n.kind.as_str(),
+                            "fn" | "struct" | "enum" | "trait" | "union" | "type_alias"
+                                | "const" | "static"
+                        ) {
+                            n.content.clone()
+                        } else {
+                            None
+                        }
+                    });
+                let source = n
+                    .metadata
+                    .get("source")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                suggestion_rules::NodeInfo {
+                    id: n.id.clone(),
+                    kind: n.kind.clone(),
+                    name,
+                    span_start: n.span_start,
+                    content: n.content.clone(),
+                    source,
+                }
+            })
+            .collect();
+
+        let findings = suggestion_rules::run_rules(&syn_file, &node_infos);
+
+        // Check which suggestions were previously dismissed
+        let dismissed = query_dismissed_suggestions(&file_node_id, instance_id);
+
+        // Track which previous suggestion comments are still present
+        let prev_rule_lines: HashMap<String, usize> = prev_suggestions
+            .iter()
+            .map(|(rule_id, line)| (rule_id.clone(), *line))
+            .collect();
+
+        for finding in &findings {
+            // Skip if this rule was previously dismissed for this target
+            let dismiss_key = format!("{}:{}", finding.rule_id, finding.target_node_id);
+            if dismissed.contains(&dismiss_key) {
+                // Check if the code has changed (target_hash comparison)
+                // For now, simple dismissal: if dismissed, skip
+                continue;
+            }
+
+            // Skip if the suggestion comment is still present in the source
+            // (it hasn't been reviewed yet)
+            if prev_rule_lines.contains_key(finding.rule_id) {
+                continue;
+            }
+
+            let suggestion_id = Uuid::new_v4().to_string();
+            let content_hash = simple_hash(&finding.target_node_id);
+
+            nodes.push(NodeRow {
+                id: suggestion_id.clone(),
+                instance_id: instance_id.to_string(),
+                kind: Kind::Suggestion.as_str().to_string(),
+                language: Some("rust".to_string()),
+                content: Some(finding.message.clone()),
+                parent_id: Some(file_node_id.clone()),
+                position: finding.line,
+                path: None,
+                metadata: json!({
+                    "rule": finding.rule_id,
+                    "status": "emitted",
+                    "target_hash": content_hash,
+                    "severity": finding.severity,
+                    "category": finding.category,
+                }),
+                span_start: Some(finding.line),
+                span_end: Some(finding.line),
+            });
+
+            edges.push(ast_walker::EdgeRow {
+                id: Uuid::new_v4().to_string(),
+                source_id: suggestion_id,
+                target_id: finding.target_node_id.clone(),
+                relation: "suggests".to_string(),
+                metadata: json!({"rule": finding.rule_id}),
+            });
+        }
+
+        // Update status of previous suggestions based on what we found in the source
+        update_suggestion_statuses(&prev_suggestions, &findings, &file_node_id);
+    }
+
     let node_count = nodes.len() + 1; // +1 for file node
     let edge_count = edges.len();
 
@@ -319,6 +469,100 @@ fn parse_single_file(
     inserter::insert_edges(&edges);
 
     (node_count, edge_count)
+}
+
+/// Query previously dismissed suggestion rule+target pairs for a file.
+fn query_dismissed_suggestions(file_node_id: &str, _instance_id: &str) -> std::collections::HashSet<String> {
+    let mut dismissed = std::collections::HashSet::new();
+
+    Spi::connect(|client| {
+        let query = format!(
+            "SELECT metadata->>'rule' AS rule, \
+             e.target_id::text AS target_id \
+             FROM kerai.nodes n \
+             JOIN kerai.edges e ON e.source_id = n.id \
+             WHERE n.parent_id = '{}'::uuid \
+             AND n.kind = 'suggestion' \
+             AND n.metadata->>'status' = 'dismissed' \
+             AND e.relation = 'suggests'",
+            file_node_id.replace('\'', "''")
+        );
+
+        let result = client.select(&query, None, &[]).unwrap();
+        for row in result {
+            let rule: String = row.get_by_name::<String, _>("rule").unwrap().unwrap_or_default();
+            let target: String = row.get_by_name::<String, _>("target_id").unwrap().unwrap_or_default();
+            dismissed.insert(format!("{}:{}", rule, target));
+        }
+    });
+
+    dismissed
+}
+
+/// Update suggestion node statuses based on what we found during re-parse.
+///
+/// If a `// kerai:` suggestion comment was removed:
+/// - And the code changed → mark as "applied"
+/// - And the code didn't change → mark as "dismissed"
+fn update_suggestion_statuses(
+    _prev_suggestions: &[(String, usize)],
+    _findings: &[suggestion_rules::Finding],
+    file_node_id: &str,
+) {
+    // Query existing "emitted" suggestions for this file
+    let mut emitted_suggestions: Vec<(String, String)> = Vec::new(); // (node_id, rule_id)
+
+    Spi::connect(|client| {
+        let query = format!(
+            "SELECT id::text, metadata->>'rule' AS rule \
+             FROM kerai.nodes \
+             WHERE parent_id = '{}'::uuid \
+             AND kind = 'suggestion' \
+             AND metadata->>'status' = 'emitted'",
+            file_node_id.replace('\'', "''")
+        );
+
+        let result = client.select(&query, None, &[]).unwrap();
+        for row in result {
+            let id: String = row
+                .get_by_name::<String, _>("id")
+                .unwrap()
+                .unwrap_or_default();
+            let rule: String = row
+                .get_by_name::<String, _>("rule")
+                .unwrap()
+                .unwrap_or_default();
+            emitted_suggestions.push((id, rule));
+        }
+    });
+
+    // For each previously emitted suggestion, check if the comment is still present
+    for (suggestion_id, rule_id) in &emitted_suggestions {
+        let comment_still_present = _prev_suggestions
+            .iter()
+            .any(|(r, _)| r == rule_id);
+
+        if !comment_still_present {
+            // The suggestion comment was removed — mark as dismissed
+            // (In a more sophisticated implementation, we'd check if the code changed
+            // to distinguish "dismissed" from "applied")
+            Spi::run(&format!(
+                "UPDATE kerai.nodes SET metadata = jsonb_set(metadata, '{{status}}', '\"dismissed\"') \
+                 WHERE id = '{}'::uuid",
+                suggestion_id.replace('\'', "''")
+            ))
+            .ok();
+        }
+    }
+}
+
+/// Simple hash for content comparison.
+fn simple_hash(s: &str) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    s.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
 }
 
 /// Match comment blocks to AST nodes and classify placement.
