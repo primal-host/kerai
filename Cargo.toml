@@ -38,6 +38,7 @@ pulldown-cmark = "0.12"
 tree-sitter = "0.24"
 tree-sitter-go = "0.23"
 tree-sitter-c = "0.23"
+git2 = "0.19"
 
 [dev-dependencies]
 pgrx-tests = "=0.17.0"
