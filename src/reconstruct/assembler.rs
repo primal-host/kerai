@@ -1,6 +1,8 @@
 /// Assemble Rust source from stored AST nodes via SPI queries.
 use pgrx::prelude::*;
 
+use crate::parser::kinds::Kind;
+
 /// Assemble source for a file node by querying its direct children.
 /// Returns raw (unformatted) Rust source text.
 pub fn assemble_file(file_node_id: &str) -> String {
@@ -24,15 +26,18 @@ pub fn assemble_file(file_node_id: &str) -> String {
 
     // Collect IDs of comment nodes that appear as direct children,
     // so we can skip them when queried via edges (avoid duplication)
+    let comment_str = Kind::Comment.as_str();
+    let comment_block_str = Kind::CommentBlock.as_str();
+
     let direct_comment_ids: std::collections::HashSet<String> = items
         .iter()
-        .filter(|i| i.kind == "comment" || i.kind == "comment_block")
+        .filter(|i| i.kind == comment_str || i.kind == comment_block_str)
         .map(|i| i.id.clone())
         .collect();
 
     for item in &items {
         // Handle comment/comment_block nodes — emit directly in position
-        if item.kind == "comment" || item.kind == "comment_block" {
+        if item.kind == comment_str || item.kind == comment_block_str {
             let placement = item.placement.as_deref().unwrap_or("above");
             // Skip trailing comments here — they'll be appended to their target item
             if placement == "trailing" {

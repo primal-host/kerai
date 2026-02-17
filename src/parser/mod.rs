@@ -12,8 +12,7 @@ mod comment_extractor;
 mod crate_walker;
 #[allow(dead_code)]
 mod inserter;
-#[allow(dead_code)]
-mod kinds;
+pub mod kinds;
 #[allow(dead_code)]
 mod metadata;
 mod normalizer;

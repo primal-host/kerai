@@ -11,7 +11,7 @@ mod functions;
 mod identity;
 mod marketplace;
 mod microgpt;
-mod parser;
+pub(crate) mod parser;
 mod peers;
 mod perspectives;
 mod query;
