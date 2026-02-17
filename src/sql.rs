@@ -1,7 +1,13 @@
 /// Centralized SQL string helpers for SPI queries.
 ///
-/// pgrx 0.17 has no parameterized query support, so all SQL values
-/// must be interpolated as strings. These helpers centralize escaping.
+/// pgrx 0.17 supports parameterized queries via `SpiClient::select`
+/// and `Spi::run_with_args` ($1-style positional parameters), but this
+/// codebase predates those and uses string interpolation throughout.
+/// These helpers centralize escaping to reduce duplication and bug risk.
+///
+/// TODO: Migrate high-traffic queries (especially `inserter.rs` batch
+/// inserts) to use $1-style parameterized queries for proper type safety
+/// instead of string interpolation.
 
 /// Escape a string for use in a SQL literal (double single quotes).
 pub fn sql_escape(s: &str) -> String {
