@@ -4,7 +4,7 @@ use serde_json::json;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::parser::ast_walker::{EdgeRow, NodeRow};
+use crate::parser::ast_walker::NodeRow;
 use crate::parser::inserter;
 
 use super::kinds;

@@ -6,14 +6,14 @@ use std::path::Path;
 use std::time::Instant;
 use uuid::Uuid;
 
-mod ast_walker;
+pub(crate) mod ast_walker;
 mod cargo_parser;
 #[allow(dead_code)]
 mod comment_extractor;
 mod crate_walker;
 mod flag_parser;
 #[allow(dead_code)]
-mod inserter;
+pub(crate) mod inserter;
 pub mod kinds;
 #[allow(dead_code)]
 mod metadata;

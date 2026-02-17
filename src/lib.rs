@@ -13,6 +13,7 @@ mod marketplace;
 mod microgpt;
 pub(crate) mod parser;
 mod peers;
+mod repo;
 mod perspectives;
 mod query;
 mod reconstruct;
@@ -4286,6 +4287,389 @@ int add(int a, int b) {
     /// sql_escape helper for tests
     fn sql_escape(s: &str) -> String {
         s.replace('\'', "''")
+    }
+
+    // --- Plan 19: Repository ingestion tests ---
+
+    /// Helper: create a temporary git repo with some files and a commit.
+    fn create_test_repo(files: &[(&str, &[u8])]) -> (String, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().expect("Failed to create temp dir");
+        let repo = git2::Repository::init(tmp.path()).expect("Failed to init repo");
+
+        // Create files
+        for (path, content) in files {
+            let full_path = tmp.path().join(path);
+            if let Some(parent) = full_path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
+            std::fs::write(&full_path, content).expect("Failed to write file");
+        }
+
+        // Stage all files
+        let mut index = repo.index().expect("Failed to get index");
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .expect("Failed to add files");
+        index.write().expect("Failed to write index");
+        let tree_oid = index.write_tree().expect("Failed to write tree");
+        let tree = repo.find_tree(tree_oid).expect("Failed to find tree");
+
+        // Create initial commit
+        let sig = git2::Signature::now("Test Author", "test@test.com")
+            .expect("Failed to create signature");
+        repo.commit(Some("HEAD"), &sig, &sig, "Initial commit", &tree, &[])
+            .expect("Failed to create commit");
+
+        let url = format!("file://{}", tmp.path().display());
+        (url, tmp)
+    }
+
+    #[pg_test]
+    fn test_mirror_repo_creates_nodes() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[
+            ("hello.c", b"int main() { return 0; }"),
+            ("README.md", b"# Hello\nWorld"),
+        ]);
+
+        let result = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .expect("mirror_repo query failed")
+        .expect("mirror_repo returned NULL");
+
+        let val = &result.0;
+        assert_eq!(val["status"], "cloned");
+        assert!(val["commits"].as_u64().unwrap() >= 1);
+        assert!(val["files"].as_u64().unwrap() >= 2);
+
+        // Verify repo_repository node exists
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_repository'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert!(count >= 1, "Expected at least 1 repo_repository node");
+    }
+
+    #[pg_test]
+    fn test_commit_nodes_created() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[("file.txt", b"hello")]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .expect("mirror_repo failed")
+        .expect("mirror_repo returned NULL");
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_commit'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert!(count >= 1, "Expected at least 1 commit node");
+
+        // Verify commit metadata has sha
+        let has_sha = Spi::get_one::<bool>(
+            "SELECT (metadata->>'sha') IS NOT NULL FROM kerai.nodes WHERE kind = 'repo_commit' LIMIT 1",
+        )
+        .unwrap()
+        .unwrap_or(false);
+        assert!(has_sha, "Commit node should have sha in metadata");
+    }
+
+    #[pg_test]
+    fn test_directory_nodes_created() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[
+            ("src/main.c", b"int main() {}"),
+            ("docs/README.md", b"# Docs"),
+        ]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .expect("mirror_repo failed")
+        .expect("mirror_repo returned NULL");
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_directory'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert!(count >= 2, "Expected at least 2 directory nodes (src, docs)");
+    }
+
+    #[pg_test]
+    fn test_parsed_file_has_ast() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let c_source = b"int add(int a, int b) { return a + b; }\nvoid hello() {}\n";
+        let (url, _tmp) = create_test_repo(&[("math.c", c_source)]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .expect("mirror_repo failed")
+        .expect("mirror_repo returned NULL");
+
+        // Should have c_function nodes from parsing
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'c_function'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert!(count >= 1, "Expected c_function nodes from parsed C file");
+    }
+
+    #[pg_test]
+    fn test_opaque_text_file() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[
+            ("script.py", b"print('hello world')\nx = 42\n"),
+        ]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .expect("mirror_repo failed")
+        .expect("mirror_repo returned NULL");
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_opaque_text'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert!(count >= 1, "Expected opaque_text node for .py file");
+
+        // Verify source is in metadata
+        let has_source = Spi::get_one::<bool>(
+            "SELECT (metadata->>'source') IS NOT NULL FROM kerai.nodes WHERE kind = 'repo_opaque_text' LIMIT 1",
+        )
+        .unwrap()
+        .unwrap_or(false);
+        assert!(has_source, "Opaque text node should have source in metadata");
+    }
+
+    #[pg_test]
+    fn test_opaque_binary_file() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        // Create a file with null bytes to trigger binary detection
+        let binary_content: Vec<u8> = vec![0x89, 0x50, 0x4E, 0x47, 0x00, 0x00, 0x00];
+        let (url, _tmp) = create_test_repo(&[("image.png", &binary_content)]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .expect("mirror_repo failed")
+        .expect("mirror_repo returned NULL");
+
+        let count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_opaque_binary'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert!(count >= 1, "Expected opaque_binary node for .png file");
+
+        // Verify sha256 in metadata
+        let has_hash = Spi::get_one::<bool>(
+            "SELECT (metadata->>'sha256') IS NOT NULL FROM kerai.nodes WHERE kind = 'repo_opaque_binary' LIMIT 1",
+        )
+        .unwrap()
+        .unwrap_or(false);
+        assert!(has_hash, "Binary node should have sha256 in metadata");
+    }
+
+    #[pg_test]
+    fn test_repo_census() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[
+            ("main.c", b"int main() {}"),
+            ("lib.c", b"void lib() {}"),
+            ("script.py", b"print('hello')"),
+            ("README.md", b"# Readme"),
+        ]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .expect("mirror_repo failed")
+        .expect("mirror_repo returned NULL");
+
+        let census = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.repo_census((SELECT id FROM kerai.repositories LIMIT 1))",
+        )
+        .expect("census query failed")
+        .expect("census returned NULL");
+
+        let val = &census.0;
+        assert!(val["total_files"].as_i64().unwrap() >= 3);
+        assert!(val["languages"].is_object());
+    }
+
+    #[pg_test]
+    fn test_mirror_idempotent() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[("file.txt", b"hello")]);
+
+        // First mirror
+        let r1 = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(r1.0["status"], "cloned");
+
+        // Second mirror — should be up_to_date
+        let r2 = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(r2.0["status"], "up_to_date");
+    }
+
+    #[pg_test]
+    fn test_incremental_update() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let repo = git2::Repository::init(tmp.path()).expect("init");
+        let sig = git2::Signature::now("Test", "t@t.com").expect("sig");
+
+        // Initial commit
+        std::fs::write(tmp.path().join("file.txt"), b"hello").expect("write");
+        let mut index = repo.index().expect("index");
+        index.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).expect("add");
+        index.write().expect("write idx");
+        let tree_oid = index.write_tree().expect("write tree");
+        let tree = repo.find_tree(tree_oid).expect("find tree");
+        let c1 = repo.commit(Some("HEAD"), &sig, &sig, "First", &tree, &[]).expect("commit");
+
+        let url = format!("file://{}", tmp.path().display());
+
+        // First mirror
+        let r1 = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(r1.0["status"], "cloned");
+
+        let commits_before = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_commit'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+
+        // Add a second commit
+        std::fs::write(tmp.path().join("new.txt"), b"world").expect("write");
+        let mut index2 = repo.index().expect("index");
+        index2.add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None).expect("add");
+        index2.write().expect("write idx");
+        let tree_oid2 = index2.write_tree().expect("write tree");
+        let tree2 = repo.find_tree(tree_oid2).expect("find tree");
+        let parent = repo.find_commit(c1).expect("find parent");
+        repo.commit(Some("HEAD"), &sig, &sig, "Second", &tree2, &[&parent]).expect("commit");
+
+        // Second mirror — should pick up new commit
+        let r2 = Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .unwrap()
+        .unwrap();
+        assert_eq!(r2.0["status"], "updated");
+        assert!(r2.0["commits"].as_u64().unwrap() >= 1);
+    }
+
+    #[pg_test]
+    fn test_drop_repo() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[("file.c", b"int x;")]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .unwrap()
+        .unwrap();
+
+        // Verify nodes exist
+        let before = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_repository'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert!(before >= 1);
+
+        // Drop
+        let drop_result = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.drop_repo((SELECT id FROM kerai.repositories LIMIT 1))",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(drop_result.0["dropped"], true);
+
+        // Verify nodes cleaned up
+        let after = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.nodes WHERE kind = 'repo_repository'",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert_eq!(after, 0);
+
+        // Verify repository record cleaned up
+        let repo_count = Spi::get_one::<i64>(
+            "SELECT count(*) FROM kerai.repositories",
+        )
+        .unwrap()
+        .unwrap_or(0);
+        assert_eq!(repo_count, 0);
+    }
+
+    #[pg_test]
+    fn test_list_repos() {
+        Spi::run("SELECT kerai.bootstrap_instance()").ok();
+
+        let (url, _tmp) = create_test_repo(&[("file.txt", b"hello")]);
+
+        Spi::get_one::<pgrx::JsonB>(&format!(
+            "SELECT kerai.mirror_repo('{}')",
+            sql_escape(&url),
+        ))
+        .unwrap()
+        .unwrap();
+
+        let list = Spi::get_one::<pgrx::JsonB>(
+            "SELECT kerai.list_repos()",
+        )
+        .unwrap()
+        .unwrap();
+
+        let repos = list.0.as_array().expect("list_repos should return array");
+        assert!(!repos.is_empty(), "Should have at least one repo");
+        assert!(repos[0]["url"].as_str().is_some());
+        assert!(repos[0]["name"].as_str().is_some());
     }
 }
 

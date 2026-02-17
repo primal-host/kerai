@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 use crate::parser::ast_walker::NodeRow;
 use crate::parser::inserter;
-use crate::sql::{sql_escape, sql_jsonb, sql_opt_text, sql_text, sql_uuid};
+use crate::sql::{sql_escape, sql_opt_text, sql_text, sql_uuid};
 
 mod census;
 mod cloner;
