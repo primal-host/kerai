@@ -35,6 +35,8 @@ uuid = { version = "1", features = ["v4"] }
 prettyplease = "0.2"
 hex = "0.4"
 pulldown-cmark = "0.12"
+tree-sitter = "0.24"
+tree-sitter-go = "0.23"
 
 [dev-dependencies]
 pgrx-tests = "=0.17.0"
