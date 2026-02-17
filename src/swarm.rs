@@ -1,10 +1,7 @@
 /// Swarm management — launch, stop, record results, observability.
 use pgrx::prelude::*;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Launch a swarm for a task. Creates a swarm agent, links it to the task, sets status='running'.
 #[pg_extern]

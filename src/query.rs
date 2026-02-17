@@ -2,10 +2,7 @@
 use pgrx::prelude::*;
 use serde_json::json;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Search nodes by content pattern (ILIKE) with optional kind filter and limit.
 ///

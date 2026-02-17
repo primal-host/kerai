@@ -1,10 +1,7 @@
 /// Agent management — register, list, get, remove AI agents.
 use pgrx::prelude::*;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Register or update an AI agent. Returns JSON with agent info.
 /// kind: 'human', 'llm', 'tool', 'swarm'

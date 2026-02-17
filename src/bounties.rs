@@ -1,10 +1,7 @@
 /// Bounties — task bounty lifecycle management.
 use pgrx::prelude::*;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Create a bounty. Uses the self instance wallet as poster.
 /// Validates reward > 0 and poster has sufficient balance.

@@ -1,10 +1,7 @@
 /// Marketplace — Dutch auction engine and market observability.
 use pgrx::prelude::*;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Create a Dutch auction for an attestation. The seller must be the self instance.
 #[pg_extern]

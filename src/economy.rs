@@ -2,11 +2,7 @@
 use pgrx::prelude::*;
 
 use crate::identity;
-
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Format bytes as PostgreSQL hex bytea literal: \xABCD...
 fn bytes_to_pg_hex(bytes: &[u8]) -> String {

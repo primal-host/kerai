@@ -2,11 +2,7 @@
 use pgrx::prelude::*;
 
 use crate::identity;
-
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Register a peer instance. Decodes hex public key, computes fingerprint,
 /// UPSERTs into kerai.instances. Returns JSON with peer info.

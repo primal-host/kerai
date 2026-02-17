@@ -4,10 +4,7 @@ use base64::Engine as _;
 use pgrx::prelude::*;
 use serde_json::Value;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Valid operation types.
 const VALID_OP_TYPES: &[&str] = &[

@@ -7,10 +7,7 @@ use uuid::Uuid;
 use crate::parser::ast_walker::NodeRow;
 use crate::parser::inserter;
 use crate::parser::path_builder::PathContext;
-
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Delete existing markdown document nodes and their children for a given filename.
 fn delete_markdown_nodes(instance_id: &str, filename: &str) {

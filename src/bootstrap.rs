@@ -19,10 +19,7 @@ fn bytes_to_pg_hex(bytes: &[u8]) -> String {
     format!("\\x{}", hex)
 }
 
-/// Escape a string for use in a SQL literal (double single quotes)
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Bootstrap the self instance and wallet. Idempotent — skips if already exists.
 #[pg_extern]

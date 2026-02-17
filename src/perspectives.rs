@@ -1,10 +1,7 @@
 /// Perspective and association CRUD — weighted views of the codebase.
 use pgrx::prelude::*;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Resolve agent name to agent_id. Errors if not found.
 fn resolve_agent(name: &str) -> String {

@@ -1,10 +1,7 @@
 /// Task management — create, get, list, update status for swarm tasks.
 use pgrx::prelude::*;
 
-/// Escape a string for use in a SQL literal (double single quotes).
-fn sql_escape(s: &str) -> String {
-    s.replace('\'', "''")
-}
+use crate::sql::sql_escape;
 
 /// Create a new task with status='pending'.
 #[pg_extern]
