@@ -2,7 +2,7 @@
 use pgrx::prelude::*;
 
 use super::ast_walker::{EdgeRow, NodeRow};
-use crate::sql::{sql_escape, sql_jsonb, sql_ltree, sql_opt_int, sql_opt_text, sql_uuid};
+use crate::sql::{sql_escape, sql_jsonb, sql_ltree, sql_opt_text, sql_uuid};
 
 const BATCH_SIZE: usize = 500;
 
