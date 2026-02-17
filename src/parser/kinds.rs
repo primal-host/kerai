@@ -30,6 +30,7 @@ pub const MACRO_CALL: &str = "macro_call";
 pub const ATTRIBUTE: &str = "attribute";
 pub const DOC_COMMENT: &str = "doc_comment";
 pub const COMMENT: &str = "comment";
+pub const COMMENT_BLOCK: &str = "comment_block";
 
 // Blocks and statements
 pub const BLOCK: &str = "block";
