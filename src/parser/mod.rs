@@ -24,6 +24,7 @@ pub mod markdown;
 mod suggestion_rules;
 mod treesitter;
 pub mod go;
+pub mod c;
 
 use ast_walker::NodeRow;
 use comment_extractor::{CommentBlock, CommentPlacement};

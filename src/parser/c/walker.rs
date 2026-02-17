@@ -87,8 +87,10 @@ fn unwrap_declarator_name(node: &tree_sitter::Node, source: &str) -> Option<Stri
 /// Check if a declaration has a specific storage class specifier.
 fn has_storage_class(node: &tree_sitter::Node, source: &str, class: &str) -> bool {
     let mut cursor = node.walk();
-    node.named_children(&mut cursor)
-        .any(|c| c.kind() == "storage_class_specifier" && node_text(&c, source) == class)
+    let children: Vec<_> = node.named_children(&mut cursor).collect();
+    children
+        .iter()
+        .any(|c| c.kind() == "storage_class_specifier" && node_text(c, source) == class)
 }
 
 /// Walk a parsed C tree and produce NodeRow/EdgeRow vectors.
