@@ -39,6 +39,11 @@ pulldown-cmark = "0.12"
 [dev-dependencies]
 pgrx-tests = "=0.17.0"
 
+[lints.clippy]
+unwrap_used = "warn"
+manual_string_new = "warn"
+redundant_closure_for_method_calls = "warn"
+
 [profile.dev]
 panic = "unwind"
 
