@@ -22,6 +22,8 @@ mod normalizer;
 mod path_builder;
 pub mod markdown;
 mod suggestion_rules;
+mod treesitter;
+pub mod go;
 
 use ast_walker::NodeRow;
 use comment_extractor::{CommentBlock, CommentPlacement};
