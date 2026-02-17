@@ -179,26 +179,47 @@ fn walk_import(ctx: &mut GoWalkCtx, node: &tree_sitter::Node, parent_id: &str, p
         Some(span_end_line(node)),
     );
 
+    // import_declaration can contain import_spec directly (single import)
+    // or import_spec_list (grouped imports) which contains the import_spec nodes
+    let mut spec_idx = 0;
     let mut cursor = node.walk();
-    for (i, child) in node.named_children(&mut cursor).enumerate() {
+    for child in node.named_children(&mut cursor) {
         if child.kind() == "import_spec" {
-            let src = ctx.source.clone();
-            let meta = metadata::import_spec_metadata(&child, &src);
-            let path = meta
-                .get("path")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string());
-            ctx.new_node(
-                kinds::GO_IMPORT_SPEC,
-                path,
-                Some(&import_id),
-                i as i32,
-                meta,
-                Some(span_start_line(&child)),
-                Some(span_end_line(&child)),
-            );
+            add_import_spec(ctx, &child, &import_id, spec_idx);
+            spec_idx += 1;
+        } else if child.kind() == "import_spec_list" {
+            let mut inner_cursor = child.walk();
+            for spec in child.named_children(&mut inner_cursor) {
+                if spec.kind() == "import_spec" {
+                    add_import_spec(ctx, &spec, &import_id, spec_idx);
+                    spec_idx += 1;
+                }
+            }
         }
     }
+}
+
+fn add_import_spec(
+    ctx: &mut GoWalkCtx,
+    node: &tree_sitter::Node,
+    parent_id: &str,
+    position: i32,
+) {
+    let src = ctx.source.clone();
+    let meta = metadata::import_spec_metadata(node, &src);
+    let path = meta
+        .get("path")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    ctx.new_node(
+        kinds::GO_IMPORT_SPEC,
+        path,
+        Some(parent_id),
+        position,
+        meta,
+        Some(span_start_line(node)),
+        Some(span_end_line(node)),
+    );
 }
 
 fn walk_func(
@@ -289,10 +310,21 @@ fn walk_type_decl(
         Some(span_end_line(node)),
     );
 
+    // type_declaration can contain type_spec directly (single) or via type_spec_list (grouped)
+    let mut spec_idx = 0;
     let mut cursor = node.walk();
-    for (i, child) in node.named_children(&mut cursor).enumerate() {
+    for child in node.named_children(&mut cursor) {
         if child.kind() == "type_spec" {
-            walk_type_spec(ctx, &child, &type_decl_id, i as i32, source);
+            walk_type_spec(ctx, &child, &type_decl_id, spec_idx, source);
+            spec_idx += 1;
+        } else if child.kind() == "type_spec_list" {
+            let mut inner_cursor = child.walk();
+            for spec in child.named_children(&mut inner_cursor) {
+                if spec.kind() == "type_spec" {
+                    walk_type_spec(ctx, &spec, &type_decl_id, spec_idx, source);
+                    spec_idx += 1;
+                }
+            }
         }
     }
 }
@@ -356,26 +388,46 @@ fn walk_struct(
         Some(span_end_line(node)),
     );
 
-    // Walk field_declaration children
+    // struct_type contains field_declaration_list which contains field_declaration nodes
+    let mut field_idx = 0;
     let mut cursor = node.walk();
-    for (i, child) in node.named_children(&mut cursor).enumerate() {
+    for child in node.named_children(&mut cursor) {
         if child.kind() == "field_declaration" {
-            let meta = metadata::field_metadata(&child, source);
-            let name = child
-                .child_by_field_name("name")
-                .map(|n| node_text(&n, source).to_string());
-
-            ctx.new_node(
-                kinds::GO_FIELD,
-                name,
-                Some(&struct_id),
-                i as i32,
-                meta,
-                Some(span_start_line(&child)),
-                Some(span_end_line(&child)),
-            );
+            add_field(ctx, &child, &struct_id, field_idx, source);
+            field_idx += 1;
+        } else if child.kind() == "field_declaration_list" {
+            let mut inner_cursor = child.walk();
+            for field in child.named_children(&mut inner_cursor) {
+                if field.kind() == "field_declaration" {
+                    add_field(ctx, &field, &struct_id, field_idx, source);
+                    field_idx += 1;
+                }
+            }
         }
     }
+}
+
+fn add_field(
+    ctx: &mut GoWalkCtx,
+    node: &tree_sitter::Node,
+    parent_id: &str,
+    position: i32,
+    source: &str,
+) {
+    let meta = metadata::field_metadata(node, source);
+    let name = node
+        .child_by_field_name("name")
+        .map(|n| node_text(&n, source).to_string());
+
+    ctx.new_node(
+        kinds::GO_FIELD,
+        name,
+        Some(parent_id),
+        position,
+        meta,
+        Some(span_start_line(node)),
+        Some(span_end_line(node)),
+    );
 }
 
 fn walk_interface(
@@ -436,23 +488,20 @@ fn walk_var_decl(
         Some(span_end_line(node)),
     );
 
+    let mut spec_idx = 0;
     let mut cursor = node.walk();
-    for (i, child) in node.named_children(&mut cursor).enumerate() {
+    for child in node.named_children(&mut cursor) {
         if child.kind() == "var_spec" {
-            let meta = metadata::var_const_spec_metadata(&child, &source);
-            let name = child
-                .child_by_field_name("name")
-                .map(|n| node_text(&n, &source).to_string());
-
-            ctx.new_node(
-                kinds::GO_VAR_SPEC,
-                name,
-                Some(&decl_id),
-                i as i32,
-                meta,
-                Some(span_start_line(&child)),
-                Some(span_end_line(&child)),
-            );
+            add_var_spec(ctx, &child, &decl_id, spec_idx, kinds::GO_VAR_SPEC);
+            spec_idx += 1;
+        } else if child.kind() == "var_spec_list" {
+            let mut inner_cursor = child.walk();
+            for spec in child.named_children(&mut inner_cursor) {
+                if spec.kind() == "var_spec" {
+                    add_var_spec(ctx, &spec, &decl_id, spec_idx, kinds::GO_VAR_SPEC);
+                    spec_idx += 1;
+                }
+            }
         }
     }
 }
@@ -474,25 +523,46 @@ fn walk_const_decl(
         Some(span_end_line(node)),
     );
 
+    let mut spec_idx = 0;
     let mut cursor = node.walk();
-    for (i, child) in node.named_children(&mut cursor).enumerate() {
+    for child in node.named_children(&mut cursor) {
         if child.kind() == "const_spec" {
-            let meta = metadata::var_const_spec_metadata(&child, &source);
-            let name = child
-                .child_by_field_name("name")
-                .map(|n| node_text(&n, &source).to_string());
-
-            ctx.new_node(
-                kinds::GO_CONST_SPEC,
-                name,
-                Some(&decl_id),
-                i as i32,
-                meta,
-                Some(span_start_line(&child)),
-                Some(span_end_line(&child)),
-            );
+            add_var_spec(ctx, &child, &decl_id, spec_idx, kinds::GO_CONST_SPEC);
+            spec_idx += 1;
+        } else if child.kind() == "const_spec_list" {
+            let mut inner_cursor = child.walk();
+            for spec in child.named_children(&mut inner_cursor) {
+                if spec.kind() == "const_spec" {
+                    add_var_spec(ctx, &spec, &decl_id, spec_idx, kinds::GO_CONST_SPEC);
+                    spec_idx += 1;
+                }
+            }
         }
     }
+}
+
+fn add_var_spec(
+    ctx: &mut GoWalkCtx,
+    node: &tree_sitter::Node,
+    parent_id: &str,
+    position: i32,
+    kind: &str,
+) {
+    let source = ctx.source.clone();
+    let meta = metadata::var_const_spec_metadata(node, &source);
+    let name = node
+        .child_by_field_name("name")
+        .map(|n| node_text(&n, &source).to_string());
+
+    ctx.new_node(
+        kind,
+        name,
+        Some(parent_id),
+        position,
+        meta,
+        Some(span_start_line(node)),
+        Some(span_end_line(node)),
+    );
 }
 
 fn walk_block(ctx: &mut GoWalkCtx, node: &tree_sitter::Node, parent_id: &str, position: i32) {
