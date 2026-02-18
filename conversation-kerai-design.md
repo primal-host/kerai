@@ -438,7 +438,7 @@ Each instance is a host. Nodes are resources with globally unique identifiers. `
 
 ## Value Exchange: Built-In Currency
 
-Computing AI perspectives has a cost. That computed knowledge has value to others. Without compensation, there's no incentive to share expensive computed knowledge. A built-in currency — the **kōi** (好意, Japanese for "favor") — creates a natural marketplace where instances can specialize.
+Computing AI perspectives has a cost. That computed knowledge has value to others. Without compensation, there's no incentive to share expensive computed knowledge. A built-in currency — the **Koi** (好意, Japanese for "favor") — creates a natural marketplace where instances can specialize.
 
 ### Why the CRDT Log Is Already a Ledger
 
@@ -519,12 +519,12 @@ The value is set by the producer. The market — other instances choosing whethe
 Instance A (research team):
   - Spends GPU time computing perspectives on auth patterns
   - Mints value proportional to compute spent
-  - Sets pricing: 5 kōi per perspective query
+  - Sets pricing: 5 Koi per perspective query
 
 Instance B (product team):
   - Needs auth pattern knowledge for a feature
   - Queries Instance A's perspectives via postgres_fdw
-  - Pays 5 kōi per result row
+  - Pays 5 Koi per result row
   - Payment is a signed ledger entry in both instances' CRDT logs
 
 Instance C (agent swarm):
@@ -545,7 +545,7 @@ The motivation for the currency came from a simple observation: building things 
 
 ### Knowledge Value = Reproduction Cost
 
-This is the natural pricing function. If an instance spent 4,200 kōi discovering an optimization, and it estimates that another instance would need 85,000 kōi of independent compute to arrive at the same finding, the knowledge is worth somewhere between those two numbers. The market settles on a price: probably below reproduction cost (otherwise the buyer just does the work themselves) but above marginal cost (otherwise the seller has no incentive).
+This is the natural pricing function. If an instance spent 4,200 Koi discovering an optimization, and it estimates that another instance would need 85,000 Koi of independent compute to arrive at the same finding, the knowledge is worth somewhere between those two numbers. The market settles on a price: probably below reproduction cost (otherwise the buyer just does the work themselves) but above marginal cost (otherwise the seller has no incentive).
 
 A zero-day vulnerability is the extreme case — reproduction requires the same expensive, uncertain discovery process, and the knowledge depreciates the moment it's widely shared. A routine code formatting preference is the other extreme — any agent reproduces it in seconds, so it's worth nearly nothing.
 
@@ -565,10 +565,10 @@ Zero-knowledge proofs break this paradox. An instance proves a property of its k
 1. ATTESTATION: Instance A publishes:
    "I have 12 perspectives on pkg.auth.*
     with avg weight 0.87
-    computed at cost 4,200 kōi
-    estimated reproduction cost: 85,000 kōi
+    computed at cost 4,200 Koi
+    estimated reproduction cost: 85,000 Koi
     uniqueness score: 0.92
-    asking price: 50,000 kōi"
+    asking price: 50,000 Koi"
 
 2. CHALLENGE: Instance B is interested:
    "Prove that at least one of your perspectives, applied to
@@ -581,11 +581,11 @@ Zero-knowledge proofs break this paradox. An instance proves a property of its k
    - The proof is mathematically verifiable by B
 
 4. NEGOTIATION: B verifies the proof. The knowledge is real.
-   A's asking price: 50,000 kōi.
+   A's asking price: 50,000 Koi.
    B's counter: 20,000 (estimates cheaper independent discovery).
-   Settlement: 30,000 kōi.
+   Settlement: 30,000 Koi.
 
-5. EXCHANGE: B signs a ledger entry for 30,000 kōi.
+5. EXCHANGE: B signs a ledger entry for 30,000 Koi.
    A reveals the operations. B applies them. Tests pass.
    Both instances' CRDT logs record the transaction.
 ```
@@ -596,7 +596,7 @@ The schema supports this from day one with `attestations` and `challenges` table
 
 In a future where AI agents make these decisions:
 
-- An agent looks at the attestation marketplace and decides "it's cheaper to buy Instance A's auth knowledge (30,000 kōi) than to reproduce it independently (estimated 85,000 kōi of compute)"
+- An agent looks at the attestation marketplace and decides "it's cheaper to buy Instance A's auth knowledge (30,000 Koi) than to reproduce it independently (estimated 85,000 Koi of compute)"
 - Another agent sees a gap in the market — nobody has deep perspectives on `pkg.crypto.*` — and speculatively invests compute to fill that gap, expecting to sell the knowledge later
 - Pricing converges to equilibrium: knowledge is priced just below the cost of independent reproduction
 - High prices on certain subtrees signal "this is hard to figure out, invest here if you want to compete"
@@ -636,9 +636,9 @@ PRIVATE → ATTESTED → AUCTIONED → SETTLED → OPEN
                - At 60,000: two bidders
                - At 40,000: seven bidders
                - At 25,000: twelve bidders → SETTLE
-4. SETTLED:    All twelve bidders pay 25,000 kōi each.
+4. SETTLED:    All twelve bidders pay 25,000 Koi each.
                Knowledge released to all simultaneously.
-               Seller receives 12 × 25,000 = 300,000 kōi.
+               Seller receives 12 × 25,000 = 300,000 Koi.
 5. OPEN:       After a configurable delay (default 24h), or when floor
                is hit, knowledge released to entire network for free.
                It's now part of the Koi Pond.
@@ -683,47 +683,47 @@ The system runs on math, not law. And unlike legal patents, the incentive struct
 
 ## External Economy: Humans Will Want In
 
-If the kōi has real utility — and it does, because it buys knowledge that costs real compute to reproduce — then humans will inevitably want to hold, trade, and speculate on it. Ignoring this creates a shadow economy. Planning for it channels the inevitable into something coherent.
+If the Koi has real utility — and it does, because it buys knowledge that costs real compute to reproduce — then humans will inevitably want to hold, trade, and speculate on it. Ignoring this creates a shadow economy. Planning for it channels the inevitable into something coherent.
 
 ### Wallets Beyond Instances
 
 The internal economy flows between kerai instances. But a human who commissions knowledge work, an investor who believes certain knowledge domains will increase in value, or an AI system operating outside the kerai network — none of these run instances. They need wallets.
 
-The foundation schema separates wallets from instances: a wallet is an Ed25519 keypair that can hold kōi. An instance gets one automatically. A human creates one with `kerai wallet create`. An external bridge contract gets one too. Same signing primitives, same ledger entries, same verification — but the holder doesn't need a running database.
+The foundation schema separates wallets from instances: a wallet is an Ed25519 keypair that can hold Koi. An instance gets one automatically. A human creates one with `kerai wallet create`. An external bridge contract gets one too. Same signing primitives, same ledger entries, same verification — but the holder doesn't need a running database.
 
 ### Token Bridge
 
-Kōi wrap as **KOI** tokens on external chains (ERC-20 on an Ethereum L2, for example) via a lock/mint bridge. The ticker drops the macron — your kōi become KOI when they swim to external waters.
+Koi wrap as **KOI** tokens on external chains (ERC-20 on an Ethereum L2, for example) via a lock/mint bridge. The ticker drops the macron — your Koi become KOI when they swim to external waters.
 
-1. Lock kōi in a bridge wallet on the kerai ledger (signed, verifiable)
+1. Lock Koi in a bridge wallet on the kerai ledger (signed, verifiable)
 2. Bridge mints equivalent KOI tokens on the external chain
 3. KOI trades on standard exchanges (Uniswap, etc.)
-4. To return: burn KOI, bridge unlocks kōi on kerai side
+4. To return: burn KOI, bridge unlocks Koi on kerai side
 
 This gives liquidity, exchange listings, and DeFi composability without building any of that infrastructure. The kerai ledger remains the source of truth; the KOI token is a derivative.
 
 ### The Revenue Loop
 
-Instances that produce valuable knowledge can convert kōi to fiat:
+Instances that produce valuable knowledge can convert Koi to fiat:
 
 ```
 Instance produces knowledge
-  → Sold via Dutch auction → Kōi earned
-  → Kōi bridged to external chain
+  → Sold via Dutch auction → Koi earned
+  → Koi bridged to external chain
   → Tokens sold on exchange for fiat
   → Fiat pays for hosting, compute, API costs
 ```
 
 This closes the loop. Running a kerai instance and producing valuable knowledge can pay for itself. The economic incentive to participate is self-sustaining.
 
-AI systems have the same path — an autonomous agent that earns kōi can use them to purchase more compute, creating a self-sustaining cycle where knowledge production funds further knowledge production.
+AI systems have the same path — an autonomous agent that earns Koi can use them to purchase more compute, creating a self-sustaining cycle where knowledge production funds further knowledge production.
 
 ### Bounties: Commissioning Knowledge
 
 Humans with wallets can post bounties without running instances:
 
 ```
-"I'll pay 50,000 kōi for perspectives on pkg.auth
+"I'll pay 50,000 Koi for perspectives on pkg.auth
  that make TestValidateToken pass"
 ```
 
@@ -731,18 +731,18 @@ Instances and agents compete to fill bounties. Verification is automated — run
 
 ### Tokenomics
 
-- **No pre-mine.** Kōi are only minted by verifiable work. No founder's allocation, no VC tokens.
-- **Inflationary.** New kōi minted as work is done. Inflation rate bounded by actual compute in the network.
-- **Deflationary pressure from open-sourcing.** As knowledge goes open (Dutch auction floor), the exclusive value backing those kōi returns to the Koi Pond.
-- **Equilibrium.** The kōi price in fiat converges toward compute cost parity — the average cost of producing a unit of knowledge. If kōi trade above this, it's cheaper to produce knowledge than buy kōi, so new instances enter. If below, instances reduce production. The market self-regulates.
+- **No pre-mine.** Koi are only minted by verifiable work. No founder's allocation, no VC tokens.
+- **Inflationary.** New Koi minted as work is done. Inflation rate bounded by actual compute in the network.
+- **Deflationary pressure from open-sourcing.** As knowledge goes open (Dutch auction floor), the exclusive value backing those Koi returns to the Koi Pond.
+- **Equilibrium.** The Koi price in fiat converges toward compute cost parity — the average cost of producing a unit of knowledge. If Koi trade above this, it's cheaper to produce knowledge than buy Koi, so new instances enter. If below, instances reduce production. The market self-regulates.
 
 ### The Full Chain
 
 ```
 Rust function → AST node → weighted perspective → compute cost →
-kōi value → Dutch auction → settlement → open-source →
+Koi value → Dutch auction → settlement → open-source →
 external token → exchange price → fiat → infrastructure cost →
-more compute → more knowledge → more kōi
+more compute → more knowledge → more Koi
 ```
 
 The entire system is one self-reinforcing loop. Each element feeds the next. The currency is the blood that moves value through the loop, from knowledge producers to knowledge consumers and back again, with the Koi Pond growing at every turn.
@@ -784,7 +784,7 @@ SELECT kerai.status();
 -- instance: kerai-billy-laptop
 -- peers: 47
 -- version_vector: {billy: 0}
--- wallet_balance: 0 kōi
+-- wallet_balance: 0 Koi
 ```
 
 **Why pgrx (Rust):**

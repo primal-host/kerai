@@ -47,7 +47,7 @@ Each gradient update produces an `update_model_weights` CRDT op with a base64-en
 
 ### Economy Integration
 
-Training mints kōi (produces value). Inference costs kōi (consumes value). Bounties can commission model training on specific ltree scopes.
+Training mints Koi (produces value). Inference costs Koi (consumes value). Bounties can commission model training on specific ltree scopes.
 
 ## Module Structure
 

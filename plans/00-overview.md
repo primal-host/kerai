@@ -47,7 +47,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 | [11](11-external-economy.md) | External Economy | 05, 10 | Wallets, token bridge, exchange listing, bounties, fiat on/off ramps |
 | [12](12-kerai-web.md) | Knowledge Editor | 01, 02, 04, 06, 08 | Web-based editor, document parsers, AI-assisted writing, corpus ingestion, real-time collaboration |
 | [13](13-microgpt.md) | MicroGPT | 01 | Tiny transformer model running inside Postgres for local inference |
-| [14](14-native-currency.md) | Native Currency | 01 | Kōi token minting, wallets, transfers, reward schedules |
+| [14](14-native-currency.md) | Native Currency | 01 | Koi token minting, wallets, transfers, reward schedules |
 | [15](15-comment-handling.md) | Comment Handling | 02, 03 | Source normalizer, comment grouping, placement classification, string-literal exclusion, comment-preserving reconstruction |
 | [16](16-reconstruction-intelligence.md) | Reconstruction Intelligence | 02, 03, 15 | Import sorting, derive ordering, inline `// kerai:` suggestions with dismissal tracking |
 | [17](17-go-language.md) | Go Language Support | 02, 15 | Parse Go source via tree-sitter, Go kinds, suggestion rules, reconstruction |
@@ -81,12 +81,12 @@ Code as structured data (nodes, edges)
             → Private knowledge depreciates (Dutch auctions, floor prices)
               → All knowledge eventually becomes open (open-source at floor)
                 → External participation: humans and AIs hold, trade, and speculate
-                  → Compute cost parity: kōi price converges to cost of knowledge production
+                  → Compute cost parity: Koi price converges to cost of knowledge production
                     → Knowledge editor: humans write with AI-assisted structural awareness
                       → New knowledge compounds: connections surface connections
 ```
 
-Each step follows from the previous. The same schema, same CRDT sync, same cryptographic identity carries through the entire chain. The final step — external participation — is not a bolt-on but a natural consequence: if kōi have real utility, external actors will want them. Plan 11 channels that inevitability into something coherent rather than letting a shadow economy form.
+Each step follows from the previous. The same schema, same CRDT sync, same cryptographic identity carries through the entire chain. The final step — external participation — is not a bolt-on but a natural consequence: if Koi have real utility, external actors will want them. Plan 11 channels that inevitability into something coherent rather than letting a shadow economy form.
 
 ## Key References
 

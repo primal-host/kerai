@@ -5,7 +5,7 @@
 
 ## Overview
 
-Turns kerai into a native Postgres-based cryptocurrency where mining is continuous (every verifiable work action auto-mints kōi), external users participate via Ed25519 signed transfers with client-side key custody, and supply grows proportionally with work.
+Turns kerai into a native Postgres-based cryptocurrency where mining is continuous (every verifiable work action auto-mints Koi), external users participate via Ed25519 signed transfers with client-side key custody, and supply grows proportionally with work.
 
 ## What Was Implemented
 

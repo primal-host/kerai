@@ -5,16 +5,16 @@
 
 ## Goal
 
-Bridge the internal kōi economy to the external world — crypto wallets, exchanges, speculation, and fiat on/off ramps. At the end of this plan, humans can hold kōi, trade them on exchanges, speculate on knowledge domains, and AI systems can autonomously manage portfolios of kōi across the kerai network and external markets.
+Bridge the internal Koi economy to the external world — crypto wallets, exchanges, speculation, and fiat on/off ramps. At the end of this plan, humans can hold Koi, trade them on exchanges, speculate on knowledge domains, and AI systems can autonomously manage portfolios of Koi across the kerai network and external markets.
 
 ## Why This Is Inevitable
 
-The kōi is grounded in verifiable compute work. It has real utility — you spend it to acquire knowledge that would cost more to reproduce independently. Any token with real utility and verifiable scarcity attracts outside interest:
+The Koi is grounded in verifiable compute work. It has real utility — you spend it to acquire knowledge that would cost more to reproduce independently. Any token with real utility and verifiable scarcity attracts outside interest:
 
 - **Humans** who commission knowledge work want to pay for it directly
 - **Investors** who believe certain knowledge domains will increase in value want exposure
 - **AI systems** operating outside the kerai network want to purchase knowledge from inside it
-- **Instances** that produce valuable knowledge want to convert kōi to fiat to cover infrastructure costs (electricity, hosting, API fees)
+- **Instances** that produce valuable knowledge want to convert Koi to fiat to cover infrastructure costs (electricity, hosting, API fees)
 
 Ignoring this creates a shadow economy. Planning for it channels the inevitable into something coherent.
 
@@ -34,7 +34,7 @@ kerai wallet list
 # Check balance
 kerai wallet balance [wallet-id]
 
-# Transfer kōi between wallets
+# Transfer Koi between wallets
 kerai wallet transfer --from <wallet-id> --to <wallet-id> --amount 5000
 
 # View transaction history
@@ -55,7 +55,7 @@ The `wallets` table (Plan 01) supports four types:
 | Type | Owner | Created By | Typical Use |
 |------|-------|------------|-------------|
 | `instance` | A kerai instance | `kerai init` (auto) | Internal knowledge economy |
-| `human` | A person | `kerai wallet create` | Holding kōi, commissioning work |
+| `human` | A person | `kerai wallet create` | Holding Koi, commissioning work |
 | `agent` | An AI agent | Agent registration | Autonomous trading, portfolio management |
 | `external` | Bridge contract | Bridge setup | Wrapped tokens on external chains |
 
@@ -63,7 +63,7 @@ All wallet types use the same Ed25519 keypair for identity and transaction signi
 
 ### 11.3 Token Bridge to External Chains
 
-Wrap kōi as **KOI** tokens on established networks for exchange listing and external trading. The ticker drops the macron — your kōi become KOI when they swim to external waters.
+Wrap Koi as **KOI** tokens on established networks for exchange listing and external trading. The ticker drops the macron — your Koi become KOI when they swim to external waters.
 
 **Bridge mechanism:**
 
@@ -71,7 +71,7 @@ Wrap kōi as **KOI** tokens on established networks for exchange listing and ext
 LOCK (kerai side) → MINT (external side)
 BURN (external side) → UNLOCK (kerai side)
 
-1. User locks 10,000 kōi in a bridge wallet on the kerai ledger
+1. User locks 10,000 Koi in a bridge wallet on the kerai ledger
    (signed transaction, from_wallet = user, to_wallet = bridge)
 2. Bridge verifies the lock transaction (signed, in the ledger)
 3. Bridge mints 10,000 KOI on the external chain (ERC-20)
@@ -80,7 +80,7 @@ BURN (external side) → UNLOCK (kerai side)
 Reverse:
 1. User burns 10,000 KOI on the external chain
 2. Bridge verifies the burn
-3. Bridge unlocks 10,000 kōi on the kerai ledger
+3. Bridge unlocks 10,000 Koi on the kerai ledger
    (signed transaction, from_wallet = bridge, to_wallet = user)
 ```
 
@@ -98,7 +98,7 @@ Once KOI trades on external exchanges, the market price reflects the collective 
 
 **Domain-specific futures.** An exchange could list derivatives on specific knowledge scopes:
 
-- "Kōi earned from `pkg.crypto.*` knowledge will increase next quarter" → bet on cryptography research being valuable
+- "Koi earned from `pkg.crypto.*` knowledge will increase next quarter" → bet on cryptography research being valuable
 - "Agent swarm efficiency will reduce reproduction costs by 50%" → bet on the deflationary pressure on knowledge prices
 
 Kerai doesn't need to build the derivatives market — external DeFi protocols handle this once the token is liquid. But the system should expose enough data for external actors to make informed bets:
@@ -115,7 +115,7 @@ kerai market export-stats --format json
 Humans (or external AIs) with wallets can commission knowledge production:
 
 ```bash
-# Post a bounty: "I'll pay 50,000 kōi for perspectives on pkg.auth
+# Post a bounty: "I'll pay 50,000 Koi for perspectives on pkg.auth
 # that make TestValidateToken pass"
 kerai bounty create \
   --scope "pkg.auth.*" \
@@ -154,59 +154,59 @@ CREATE INDEX idx_bounties_reward ON bounties(reward);
 
 ### 11.6 Revenue Model for Instances
 
-Instances that produce valuable knowledge can convert kōi to fiat:
+Instances that produce valuable knowledge can convert Koi to fiat:
 
 ```
 Instance produces knowledge
   → Knowledge sold via Dutch auction (Plan 10)
-  → Kōi earned
-  → Kōi transferred to human wallet
-  → Kōi bridged to external chain
+  → Koi earned
+  → Koi transferred to human wallet
+  → Koi bridged to external chain
   → Tokens sold on exchange for fiat
   → Fiat pays for hosting, compute, API costs
 ```
 
-This closes the loop. The economic incentive to run a kerai instance and produce knowledge is: it can pay for itself. An instance that consistently produces high-value perspectives earns kōi that convert to real money.
+This closes the loop. The economic incentive to run a kerai instance and produce knowledge is: it can pay for itself. An instance that consistently produces high-value perspectives earns Koi that convert to real money.
 
-AI systems have the same path — an autonomous agent that earns kōi can use them to purchase more compute (API calls, GPU time), creating a self-sustaining cycle where knowledge production funds further knowledge production.
+AI systems have the same path — an autonomous agent that earns Koi can use them to purchase more compute (API calls, GPU time), creating a self-sustaining cycle where knowledge production funds further knowledge production.
 
 ### 11.7 Fiat On-Ramp
 
-For humans who want to buy kōi without running an instance:
+For humans who want to buy Koi without running an instance:
 
 ```bash
-# Purchase kōi with fiat (via integrated payment processor or exchange)
+# Purchase Koi with fiat (via integrated payment processor or exchange)
 kerai wallet buy --amount 10000 --payment-method stripe
 
 # Or: buy KOI on an exchange, then bridge them into kerai
 # (no kerai-specific tooling needed, just standard token bridge UI)
 ```
 
-The fiat on-ramp lets humans commission bounties, bid in auctions, and participate in the economy without producing knowledge themselves. They bring capital; instances bring knowledge. The exchange rate between fiat and kōi is set by the external market.
+The fiat on-ramp lets humans commission bounties, bid in auctions, and participate in the economy without producing knowledge themselves. They bring capital; instances bring knowledge. The exchange rate between fiat and Koi is set by the external market.
 
 ## Tokenomics
 
 ### Supply
 
-- **No pre-mine.** Kōi are only minted by verifiable work (perspectives computed, tests run, queries answered). There's no initial token allocation, no founder's share, no VC allocation.
-- **Inflationary.** New kōi are minted as work is done. The inflation rate is bounded by the amount of actual compute happening in the network. More work = more kōi, but also more knowledge produced and more utility backing each kōi.
-- **Deflationary pressure from open-sourcing.** As knowledge goes open (Dutch auction floor), the exclusive value it backed returns to the Koi Pond. Kōi spent acquiring that knowledge don't disappear, but the knowledge that gave them utility is now free. This creates natural deflationary pressure — older kōi backed less exclusive knowledge.
+- **No pre-mine.** Koi are only minted by verifiable work (perspectives computed, tests run, queries answered). There's no initial token allocation, no founder's share, no VC allocation.
+- **Inflationary.** New Koi are minted as work is done. The inflation rate is bounded by the amount of actual compute happening in the network. More work = more Koi, but also more knowledge produced and more utility backing each Koi.
+- **Deflationary pressure from open-sourcing.** As knowledge goes open (Dutch auction floor), the exclusive value it backed returns to the Koi Pond. Koi spent acquiring that knowledge don't disappear, but the knowledge that gave them utility is now free. This creates natural deflationary pressure — older Koi backed less exclusive knowledge.
 
 ### Demand
 
-- **Utility demand:** Instances need kōi to query other instances, acquire knowledge, and participate in auctions.
-- **Speculative demand:** External actors believe the knowledge economy will grow, increasing future demand for kōi.
-- **Commissioning demand:** Humans and external AIs post bounties that require kōi.
+- **Utility demand:** Instances need Koi to query other instances, acquire knowledge, and participate in auctions.
+- **Speculative demand:** External actors believe the knowledge economy will grow, increasing future demand for Koi.
+- **Commissioning demand:** Humans and external AIs post bounties that require Koi.
 
 ### Equilibrium
 
-The kōi price in fiat should converge toward the average cost of compute per unit of knowledge produced. If kōi trade above this, it's cheaper to produce knowledge than buy kōi — new instances enter the market, increasing supply. If kōi trade below, it's cheaper to buy kōi than to compute — instances reduce production, decreasing supply. The market self-regulates around compute cost parity.
+The Koi price in fiat should converge toward the average cost of compute per unit of knowledge produced. If Koi trade above this, it's cheaper to produce knowledge than buy Koi — new instances enter the market, increasing supply. If Koi trade below, it's cheaper to buy Koi than to compute — instances reduce production, decreasing supply. The market self-regulates around compute cost parity.
 
 ## Decisions to Make
 
 - **Token standard:** KOI as ERC-20 on which L2? Proposed: start with Base (Coinbase L2) for simplicity and accessibility, add others later.
-- **Bridge custody:** Who holds the locked kōi on the kerai side? Proposed: a multi-sig bridge wallet requiring N-of-M instance signatures to unlock. Decentralized custody from the start.
-- **Regulatory considerations:** Utility tokens have different regulatory treatment than securities in most jurisdictions. The kōi is clearly a utility token (it's spent on a specific service — knowledge queries). Legal review recommended before exchange listing.
+- **Bridge custody:** Who holds the locked Koi on the kerai side? Proposed: a multi-sig bridge wallet requiring N-of-M instance signatures to unlock. Decentralized custody from the start.
+- **Regulatory considerations:** Utility tokens have different regulatory treatment than securities in most jurisdictions. The Koi is clearly a utility token (it's spent on a specific service — knowledge queries). Legal review recommended before exchange listing.
 - **Minimum mint for external trading:** Should there be a minimum network size (number of instances, volume of transactions) before enabling the external bridge? Proposed: yes. The internal economy should prove itself before external speculation enters. Launch the bridge when the network has 100+ active instances and a meaningful transaction volume.
 
 ## Out of Scope
