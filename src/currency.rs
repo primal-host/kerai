@@ -1,8 +1,15 @@
 /// Currency — native kōi cryptocurrency: wallet registration, signed transfers, mining rewards.
+///
+/// All monetary amounts are denominated in nKoi (nano-Koi).
+/// 1 Koi = 1,000,000,000 nKoi (10^9). Stored as BIGINT in Postgres.
+/// 9 whole digits + implicit decimal + 9 fractional digits.
 use pgrx::prelude::*;
 
 use crate::identity;
 use crate::sql::sql_escape;
+
+/// 1 Koi = 1,000,000,000 nKoi
+pub const NKOI_PER_KOI: i64 = 1_000_000_000;
 
 /// Format bytes as PostgreSQL hex bytea literal: \xABCD...
 fn bytes_to_pg_hex(bytes: &[u8]) -> String {
@@ -177,7 +184,7 @@ fn signed_transfer(
 
     if balance < amount {
         error!(
-            "Insufficient balance: wallet {} has {} kōi but transfer requires {}",
+            "Insufficient balance: wallet {} has {} nKoi but transfer requires {}",
             from_wallet_id, balance, amount
         );
     }
@@ -449,7 +456,7 @@ fn evaluate_mining() -> pgrx::JsonB {
 
     // If there are many nodes but few rewards, issue a bonus
     if node_count > 0 && rewarded_parses == 0 {
-        let bonus = std::cmp::min(node_count, 100); // Cap at 100
+        let bonus = std::cmp::min(node_count, 100) * NKOI_PER_KOI; // 1 Koi per node, cap 100 Koi
         let lamport = Spi::get_one::<i64>(
             "SELECT COALESCE(max(timestamp), 0) + 1 FROM kerai.ledger",
         )
