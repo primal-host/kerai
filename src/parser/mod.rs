@@ -197,6 +197,183 @@ fn parse_source(source: &str, filename: &str) -> pgrx::JsonB {
     }))
 }
 
+/// Parse a directory tree in parallel using pg_background workers.
+///
+/// Walks the directory, discovers parseable files (.rs, .go, .c, .h, .md),
+/// launches a pg_background worker for each, waits for all to complete,
+/// and returns a JSON summary.
+///
+/// Requires the pg_background extension to be installed.
+#[pg_extern]
+fn parallel_parse(path: &str) -> pgrx::JsonB {
+    let start = Instant::now();
+    let root = Path::new(path);
+
+    if !root.exists() {
+        pgrx::error!("Path does not exist: {}", path);
+    }
+
+    // Check pg_background is available
+    let has_pgbg = Spi::get_one::<bool>(
+        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_background')",
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false);
+
+    if !has_pgbg {
+        pgrx::error!("pg_background extension is not installed. Run: CREATE EXTENSION pg_background;");
+    }
+
+    // Discover parseable files
+    let mut files: Vec<(String, String)> = Vec::new(); // (path, parse_command)
+
+    for entry in walkdir::WalkDir::new(root)
+        .follow_links(true)
+        .into_iter()
+        .filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            !name.starts_with('.')
+                && name != "target"
+                && name != "tgt"
+                && name != "node_modules"
+                && name != "vendor"
+        })
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let file_path = entry.path();
+        let abs_path = file_path.to_string_lossy().replace('\'', "''");
+        let filename = file_path
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let ext = file_path
+            .extension()
+            .map(|e| e.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        let cmd = match ext.as_str() {
+            "rs" => {
+                // For Rust files, read source and use parse_source (avoids double file reads)
+                format!(
+                    "SELECT kerai.parse_source(pg_read_file('{}'), '{}')",
+                    abs_path,
+                    filename.replace('\'', "''")
+                )
+            }
+            "go" => format!("SELECT kerai.parse_go_file('{}')", abs_path),
+            "c" | "h" => format!("SELECT kerai.parse_c_file('{}')", abs_path),
+            "md" => {
+                let safe_name = filename.replace('\'', "''");
+                format!(
+                    "SELECT kerai.parse_markdown(pg_read_file('{}'), '{}')",
+                    abs_path, safe_name
+                )
+            }
+            _ => continue,
+        };
+
+        files.push((filename, cmd));
+    }
+
+    if files.is_empty() {
+        return pgrx::JsonB(json!({
+            "path": path,
+            "files": 0,
+            "nodes": 0,
+            "edges": 0,
+            "elapsed_ms": start.elapsed().as_millis() as u64,
+        }));
+    }
+
+    // Launch all workers in parallel
+    let mut handles: Vec<(String, i32, i64)> = Vec::new(); // (filename, pid, cookie)
+
+    for (filename, cmd) in &files {
+        let safe_cmd = cmd.replace('\'', "''");
+        let launch_sql = format!(
+            "SELECT pid, cookie FROM pg_background_launch_v2('{}')",
+            safe_cmd
+        );
+
+        match Spi::connect(|client| {
+            let row = client
+                .select(&launch_sql, None, &[])?
+                .first()
+                .get_two::<i32, i64>()?;
+            Ok::<_, spi::Error>(row)
+        }) {
+            Ok((Some(pid), Some(cookie))) => {
+                handles.push((filename.clone(), pid, cookie));
+            }
+            Ok(_) => {
+                warning!("Failed to launch worker for {}: null pid/cookie", filename);
+            }
+            Err(e) => {
+                warning!("Failed to launch worker for {}: {}", filename, e);
+                // If we hit max_worker_processes, stop launching and wait for what we have
+                break;
+            }
+        }
+    }
+
+    let launched = handles.len();
+
+    // Wait for all and collect results
+    let mut total_nodes = 0u64;
+    let mut total_edges = 0u64;
+    let mut results: Vec<serde_json::Value> = Vec::new();
+
+    for (filename, pid, cookie) in &handles {
+        // Wait for completion
+        let wait_sql = format!("SELECT pg_background_wait_v2({}, {})", pid, cookie);
+        let _ = Spi::run(&wait_sql);
+
+        // Collect result
+        let result_sql = format!(
+            "SELECT result FROM pg_background_result_v2({}, {}) AS (result jsonb)",
+            pid, cookie
+        );
+
+        match Spi::get_one::<pgrx::JsonB>(&result_sql) {
+            Ok(Some(pgrx::JsonB(val))) => {
+                let nodes = val.get("nodes").and_then(|v| v.as_u64()).unwrap_or(0);
+                let edges = val.get("edges").and_then(|v| v.as_u64()).unwrap_or(0);
+                total_nodes += nodes;
+                total_edges += edges;
+                results.push(json!({
+                    "file": filename,
+                    "nodes": nodes,
+                    "edges": edges,
+                }));
+            }
+            Ok(None) => {
+                results.push(json!({"file": filename, "error": "no result"}));
+            }
+            Err(e) => {
+                results.push(json!({"file": filename, "error": e.to_string()}));
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    pgrx::JsonB(json!({
+        "path": path,
+        "files": launched,
+        "nodes": total_nodes,
+        "edges": total_edges,
+        "results": results,
+        "elapsed_ms": elapsed.as_millis() as u64,
+    }))
+}
+
 /// Parse a single Rust file's source, insert nodes/edges, return counts.
 ///
 /// `parent_id` allows parenting the file node under a repo directory node.
