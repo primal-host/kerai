@@ -164,7 +164,7 @@ enum CliCommand {
         action: MarketAction,
     },
 
-    /// Manage kōi wallets
+    /// Manage Koi wallets
     Wallet {
         #[command(subcommand)]
         action: WalletAction,
@@ -315,7 +315,7 @@ enum MarketAction {
         /// Attestation ID
         attestation_id: String,
 
-        /// Starting price in kōi
+        /// Starting price in Koi
         #[arg(long)]
         starting_price: i64,
 
@@ -427,7 +427,7 @@ enum WalletAction {
         wallet_id: Option<String>,
     },
 
-    /// Transfer kōi between wallets
+    /// Transfer Koi between wallets
     Transfer {
         /// Source wallet ID
         #[arg(long)]
@@ -469,7 +469,7 @@ enum BountyAction {
         #[arg(long)]
         description: String,
 
-        /// Reward in kōi
+        /// Reward in Koi
         #[arg(long)]
         reward: i64,
 
@@ -734,7 +734,7 @@ enum CurrencyAction {
         #[arg(long)]
         work_type: String,
 
-        /// Reward amount in kōi
+        /// Reward amount in Koi
         #[arg(long)]
         reward: i64,
 

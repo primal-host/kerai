@@ -40,7 +40,7 @@ fn create_bounty(
 
     if balance < reward {
         error!(
-            "Insufficient balance to fund bounty: have {} kōi, need {}",
+            "Insufficient balance to fund bounty: have {} Koi, need {}",
             balance, reward
         );
     }
@@ -244,7 +244,7 @@ fn settle_bounty(bounty_id: pgrx::Uuid) -> pgrx::JsonB {
 
     if balance < reward {
         error!(
-            "Poster wallet has insufficient balance: {} kōi, needs {}",
+            "Poster wallet has insufficient balance: {} Koi, needs {}",
             balance, reward
         );
     }

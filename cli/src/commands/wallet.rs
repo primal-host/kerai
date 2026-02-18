@@ -113,7 +113,7 @@ pub fn balance(
         serde_json::from_str(&text).map_err(|e| format!("Invalid JSON: {e}"))?;
 
     let bal = value["balance"].as_i64().unwrap_or(0);
-    println!("Balance: {bal} kōi");
+    println!("Balance: {bal} Koi");
     print_json(&value, format);
     Ok(())
 }
@@ -137,7 +137,7 @@ pub fn transfer(
     let value: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Invalid JSON: {e}"))?;
 
-    println!("Transferred {amount} kōi");
+    println!("Transferred {amount} Koi");
     print_json(&value, format);
     Ok(())
 }

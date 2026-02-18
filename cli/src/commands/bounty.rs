@@ -23,7 +23,7 @@ pub fn create(
         serde_json::from_str(&text).map_err(|e| format!("Invalid JSON: {e}"))?;
 
     let id = value["id"].as_str().unwrap_or("unknown");
-    println!("Created bounty {id} ({reward} kōi)");
+    println!("Created bounty {id} ({reward} Koi)");
     print_json(&value, format);
     Ok(())
 }
@@ -149,7 +149,7 @@ pub fn settle(
         serde_json::from_str(&text).map_err(|e| format!("Invalid JSON: {e}"))?;
 
     let reward = value["reward"].as_i64().unwrap_or(0);
-    println!("Bounty {bounty_id} settled ({reward} kōi transferred)");
+    println!("Bounty {bounty_id} settled ({reward} Koi transferred)");
     print_json(&value, format);
     Ok(())
 }

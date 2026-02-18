@@ -1,4 +1,4 @@
-/// Economy — wallet management, kōi transfers, and minting.
+/// Economy — wallet management, Koi transfers, and minting.
 ///
 /// All monetary amounts are denominated in nKoi (nano-Koi).
 /// 1 Koi = 1,000,000,000 nKoi (10^9). See currency::NKOI_PER_KOI.
@@ -156,7 +156,7 @@ fn get_wallet_balance(wallet_id: pgrx::Uuid) -> pgrx::JsonB {
     }))
 }
 
-/// Transfer kōi between wallets. Validates sufficient balance.
+/// Transfer Koi between wallets. Validates sufficient balance.
 #[pg_extern]
 fn transfer_koi(
     from_wallet_id: pgrx::Uuid,
@@ -239,7 +239,7 @@ fn transfer_koi(
     row
 }
 
-/// Mint kōi from verifiable work. from_wallet is NULL (creation).
+/// Mint Koi from verifiable work. from_wallet is NULL (creation).
 /// Only the self instance can mint.
 #[pg_extern]
 fn mint_koi(

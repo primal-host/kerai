@@ -48,7 +48,7 @@ pub fn transfer(
     let value: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Invalid JSON: {e}"))?;
 
-    println!("Signed transfer of {amount} kōi completed");
+    println!("Signed transfer of {amount} Koi completed");
     print_json(&value, format);
     Ok(())
 }
@@ -64,7 +64,7 @@ pub fn supply(client: &mut Client, format: &OutputFormat) -> Result<(), String> 
 
     let total = value["total_supply"].as_i64().unwrap_or(0);
     let wallets = value["wallet_count"].as_i64().unwrap_or(0);
-    println!("Total supply: {total} kōi across {wallets} wallets");
+    println!("Total supply: {total} Koi across {wallets} wallets");
     print_json(&value, format);
     Ok(())
 }
@@ -87,7 +87,7 @@ pub fn share(
 
     let balance = value["balance"].as_i64().unwrap_or(0);
     let share_str = value["share"].as_str().unwrap_or("0");
-    println!("Balance: {balance} kōi (share: {share_str})");
+    println!("Balance: {balance} Koi (share: {share_str})");
     print_json(&value, format);
     Ok(())
 }
@@ -155,7 +155,7 @@ pub fn set_reward(
     let value: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| format!("Invalid JSON: {e}"))?;
 
-    println!("Reward schedule updated for '{work_type}': {reward} kōi");
+    println!("Reward schedule updated for '{work_type}': {reward} Koi");
     print_json(&value, format);
     Ok(())
 }

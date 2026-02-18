@@ -1,4 +1,4 @@
-/// Currency — native kōi cryptocurrency: wallet registration, signed transfers, mining rewards.
+/// Currency — native Koi cryptocurrency: wallet registration, signed transfers, mining rewards.
 ///
 /// All monetary amounts are denominated in nKoi (nano-Koi).
 /// 1 Koi = 1,000,000,000 nKoi (10^9). Stored as BIGINT in Postgres.

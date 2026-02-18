@@ -555,7 +555,7 @@ fn apply_create_wallet(payload: &Value) -> String {
     wallet_id
 }
 
-/// Transfer kōi between wallets via ledger INSERT.
+/// Transfer Koi between wallets via ledger INSERT.
 fn apply_transfer_koi(payload: &Value) -> String {
     let from_wallet = payload.get("from_wallet").and_then(|v| v.as_str());
     let to_wallet = payload["to_wallet"]

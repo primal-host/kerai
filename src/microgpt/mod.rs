@@ -725,7 +725,7 @@ fn uuid_to_string(u: pgrx::Uuid) -> String {
     )
 }
 
-/// Mint kōi reward for training.
+/// Mint Koi reward for training.
 fn mint_training_reward(agent_id: &str, steps: usize) {
     // Look up the agent's wallet
     let wallet_sql = format!(
@@ -766,7 +766,7 @@ fn mint_training_reward(agent_id: &str, steps: usize) {
     let _ = Spi::run(&log_sql);
 }
 
-/// Deduct kōi for inference.
+/// Deduct Koi for inference.
 fn deduct_inference_cost(agent_id: &str) {
     // Look up the agent's wallet
     let wallet_sql = format!(

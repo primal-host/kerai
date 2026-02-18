@@ -2399,7 +2399,7 @@ impl Config {
         .unwrap()
     }
 
-    /// Helper: mint kōi to the self wallet and return the wallet ID.
+    /// Helper: mint Koi to the self wallet and return the wallet ID.
     fn mint_to_self(amount: i64) -> String {
         let wallet_id = get_self_wallet_id();
         Spi::run(&format!(
@@ -2496,7 +2496,7 @@ impl Config {
         .unwrap();
         let human_id = human.0["id"].as_str().unwrap().to_string();
 
-        // Transfer 300 kōi
+        // Transfer 300 Koi
         let result = Spi::get_one::<pgrx::JsonB>(&format!(
             "SELECT kerai.transfer_koi('{}'::uuid, '{}'::uuid, 300, 'payment')",
             self_wallet, human_id,
@@ -2836,7 +2836,7 @@ impl Config {
         .unwrap();
         let from_id = wallet.0["id"].as_str().unwrap().to_string();
 
-        // Mint some kōi to the registered wallet
+        // Mint some Koi to the registered wallet
         Spi::run(&format!(
             "SELECT kerai.mint_koi('{}'::uuid, 500, 'seed', NULL, NULL)",
             from_id,
