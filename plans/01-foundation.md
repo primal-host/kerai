@@ -132,31 +132,35 @@ CREATE TABLE versions (
 
 The `signature` column is populated by signing the canonical form of the operation (node_id, operation, payload fields, author, timestamp) with the instance's private key. Any instance holding the corresponding public key can verify the operation's authenticity. This is the provenance guarantee — if it's not signed from day one, historical operations become unverifiable.
 
-**`wallets`** — holders of currency (instances, humans, AIs, external entities)
+**`wallets`** — holders of currency (instances, humans, AIs, bridge entities)
 
 ```sql
 CREATE TABLE wallets (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    instance_id     uuid REFERENCES instances(id),    -- null for external (non-instance) wallets
+    instance_id     uuid REFERENCES instances(id),    -- null for non-instance wallets
     public_key      bytea NOT NULL,                   -- Ed25519 public key (wallet identity)
     key_fingerprint text NOT NULL,                    -- human-readable fingerprint
-    wallet_type     text NOT NULL DEFAULT 'instance', -- "instance", "human", "agent", "external"
+    wallet_type     text NOT NULL DEFAULT 'instance', -- "instance", "human", "agent", "bridge"
     label           text,                             -- human-readable name
     metadata        jsonb DEFAULT '{}',
     created_at      timestamptz DEFAULT now()
 );
 ```
 
-Every instance gets a wallet automatically (linked via `instance_id`). But wallets can also exist independently — a human holding Koi, an AI agent with its own balance, or an external entity on a bridge. The wallet's identity is its Ed25519 public key, the same cryptographic primitive used throughout kerai. This separation allows the currency to flow beyond instance-to-instance transactions (Plan 11).
+Every instance gets a wallet automatically (linked via `instance_id`). But wallets can also exist independently — a human holding Koi, an AI agent with its own balance, or a bridge entity exchanging Koi for USDC. The wallet's identity is its Ed25519 public key, the same cryptographic primitive used throughout kerai. This separation allows the currency to flow beyond instance-to-instance transactions (Plan 11).
+
+The wallet table is the server-side identity record. Under Plan 20, wallets gain client-side state managed by Fuchi (spending keys, viewing keys, commitment inventory). The server-side table does not change — Fuchi extends the wallet with private data that never enters Postgres.
 
 **`ledger`** — economic transactions between wallets
+
+All monetary amounts are denominated in nKoi (nano-Koi). 1 Koi = 1,000,000,000 nKoi (10^9). Stored as BIGINT — 9 whole digits + implicit decimal + 9 fractional digits.
 
 ```sql
 CREATE TABLE ledger (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     from_wallet     uuid REFERENCES wallets(id),      -- null for minting (value creation from work)
     to_wallet       uuid NOT NULL REFERENCES wallets(id),
-    amount          bigint NOT NULL,                   -- smallest unit of currency
+    amount          bigint NOT NULL,                   -- nKoi
     reason          text NOT NULL,                     -- "perspective_compute", "query_response", "test_execution", "mint", "transfer"
     reference_id    uuid,                              -- what was this for? (node_id, version_id, etc.)
     reference_type  text,                              -- "node", "version", "perspective", "query", "auction"
@@ -166,7 +170,9 @@ CREATE TABLE ledger (
 );
 ```
 
-Value is minted by verifiable work — computing perspectives, running tests, producing operations. The mint is not arbitrary: the `reference_id` points to the work product, and any instance can verify the work exists and is signed. Payments for knowledge access are signed by the paying wallet. The ledger supports instance-to-instance transactions (the common case) and wallet-to-wallet transfers (enabling human and external participation in the economy — Plan 11).
+This is the plaintext ledger — the starting point. Value is minted by verifiable work — computing perspectives, running tests, producing operations. The mint is not arbitrary: the `reference_id` points to the work product, and any instance can verify the work exists and is signed. Payments for knowledge access are signed by the paying wallet.
+
+Plan 20 adds a `private_ledger` alongside this table, storing Pedersen commitments instead of plaintext amounts. Both coexist — users choose to "shield" Koi into the private ledger or operate in plaintext. Over time, the private ledger becomes the default path. The plaintext ledger remains for transparency-by-choice and backward compatibility.
 
 **`pricing`** — what does this instance charge?
 
@@ -176,7 +182,7 @@ CREATE TABLE pricing (
     instance_id     uuid NOT NULL REFERENCES instances(id),
     resource_type   text NOT NULL,        -- "query", "perspective", "node_access", "compute"
     scope           ltree,                -- optional: price applies to this subtree only
-    unit_cost       bigint NOT NULL,      -- cost per unit
+    unit_cost       bigint NOT NULL,      -- nKoi
     unit_type       text NOT NULL,        -- "per_node", "per_query", "per_op", "per_second"
     metadata        jsonb DEFAULT '{}',
     created_at      timestamptz DEFAULT now(),
@@ -196,12 +202,12 @@ CREATE TABLE attestations (
     claim_type          text NOT NULL,            -- "perspective", "solution", "analysis", "optimization"
     perspective_count   integer,                  -- how many perspectives (if applicable)
     avg_weight          float,                    -- average significance
-    compute_cost        bigint NOT NULL,          -- actual Koi spent producing this knowledge
-    reproduction_est    bigint NOT NULL,          -- estimated cost for others to independently reproduce
+    compute_cost        bigint NOT NULL,          -- nKoi: actual cost spent producing this knowledge
+    reproduction_est    bigint NOT NULL,          -- nKoi: estimated cost for others to independently reproduce
     uniqueness_score    float DEFAULT 0.5,        -- 0.0 = trivially reproducible, 1.0 = believed unique
-    proof_type          text NOT NULL DEFAULT 'attestation-only', -- "zk-snark", "zk-stark", "attestation-only"
-    proof_data          bytea,                    -- ZK proof data (null for attestation-only, filled when ZK is implemented)
-    asking_price        bigint NOT NULL,          -- what the instance wants for full disclosure
+    proof_type          text NOT NULL DEFAULT 'attestation-only', -- "plonk", "bulletproof", "attestation-only"
+    proof_data          bytea,                    -- ZK proof data (null for attestation-only)
+    asking_price        bigint NOT NULL,          -- nKoi
     exclusive           boolean DEFAULT false,    -- offered to one buyer, or many?
     signature           bytea NOT NULL,           -- signed by the instance
     expires_at          timestamptz,              -- knowledge depreciates; null = no expiry
@@ -210,6 +216,8 @@ CREATE TABLE attestations (
 ```
 
 Attestations are the marketplace layer. An instance advertises what it knows — scope, significance, cost basis, estimated reproduction difficulty, and asking price — without revealing the knowledge itself. Other instances browse attestations, verify proofs (when available), negotiate, pay, and receive disclosure. The `proof_data` column is null until ZK proof generation is implemented; the schema is ready for it.
+
+The `proof_type` values align with the proof systems chosen in Plans 10 and 20: PLONK for complex circuits (knowledge attestation, mint verification), Bulletproofs for range proofs (funding sufficiency, balance conservation). Both share the same Curve25519 foundation as the Ed25519 identity layer.
 
 The `reproduction_est` is the natural pricing anchor: knowledge is worth roughly what it would cost someone else to independently rediscover. A zero-day is worth more because reproduction requires the same expensive discovery process. A trivial formatting preference is worth almost nothing because any agent could arrive at it in seconds.
 
@@ -226,8 +234,8 @@ CREATE TABLE challenges (
     challenge_data  jsonb NOT NULL,           -- specifics: version vector, test command, etc.
     response_proof  bytea,                    -- ZK proof response (null until answered)
     status          text NOT NULL DEFAULT 'pending', -- "pending", "proved", "failed", "expired", "settled"
-    offered_price   bigint,                   -- what the challenger is willing to pay
-    settled_price   bigint,                   -- final agreed price (null until settled)
+    offered_price   bigint,                   -- nKoi: what the challenger is willing to pay
+    settled_price   bigint,                   -- nKoi: final agreed price (null until settled)
     signature       bytea NOT NULL,           -- signed by challenger
     created_at      timestamptz DEFAULT now(),
     settled_at      timestamptz
@@ -235,6 +243,8 @@ CREATE TABLE challenges (
 ```
 
 Challenges are how buyers verify claims before paying. A challenger says "prove your knowledge does X for my state Y" and the attester either proves it (ZK or otherwise) or doesn't. Settlement happens when both parties agree on price and the knowledge is disclosed.
+
+Under Plan 20, the `offered_price` and `settled_price` remain plaintext (these are selective disclosures — the market needs to see them). But the actual payment at settlement uses the private ledger: the challenger's Fuchi generates a transfer proof rather than a plaintext ledger entry.
 
 ### 1.3 Key Generation
 
@@ -248,6 +258,8 @@ $PGDATA/kerai/
 ```
 
 Ed25519 is chosen for: fast signing (important when signing every operation), small keys (32 bytes), small signatures (64 bytes), and wide library support. The `ed25519-dalek` crate is the standard Rust implementation — pure Rust, no C dependencies, constant-time operations.
+
+The curve choice is deliberate: Ed25519 operates on Curve25519. Plan 20's Bulletproofs use the same curve for range proofs and balance conservation proofs. One curve, two purposes — signing (Ed25519) and privacy (Bulletproofs). The `curve25519-dalek` crate serves both, sharing key material and verification infrastructure. This is not a coincidence; it's why Ed25519 was chosen over alternatives like secp256k1.
 
 ### 1.4 Indexes
 
@@ -304,6 +316,8 @@ CREATE INDEX idx_nodes_metadata ON nodes USING gin(metadata);
 CREATE INDEX idx_nodes_kind ON nodes(kind);
 ```
 
+Plan 20 adds indexes for the `private_ledger` (nullifier uniqueness, epoch ordering) and `nullifiers` table. These are additive — no existing indexes change.
+
 ### 1.5 Verification Queries
 
 A set of SQL queries that exercise the schema to confirm it works:
@@ -354,10 +368,29 @@ SELECT kerai.sync('remote-instance');
 SELECT kerai.attest('pkg.auth', compute_cost := 4200, reproduction_est := 85000);
 SELECT kerai.auction(attestation_id, start := 80000, floor := 0);
 SELECT kerai.bid(auction_id, max_price := 35000);
-SELECT kerai.wallet_balance();
+
+-- Wallet operations (Plans 11, 14, 20)
+SELECT kerai.wallet_balance();                   -- plaintext mode: queries ledger directly
+                                                  -- private mode (Plan 20): delegates to Fuchi
+SELECT kerai.total_supply();                     -- sum of all mint amounts (always public)
+SELECT kerai.supply_info();                      -- aggregate stats, no individual balances
 ```
 
 These functions compose with standard SQL — you can join their results, filter them, aggregate them. The DSL is an enrichment layer, not a replacement for SQL.
+
+## Denomination
+
+The native currency is **Koi**. All monetary amounts in the schema are denominated in **nKoi** (nano-Koi):
+
+- 1 Koi = 1,000,000,000 nKoi (10^9)
+- Stored as `BIGINT` in Postgres (signed 64-bit integer, max ~9.2 × 10^18)
+- 9 whole digits + implicit decimal + 9 fractional digits
+- Maximum representable: ~9.2 billion Koi at nKoi precision
+- Total supply headroom: comfortable for a 1 billion Koi cap
+
+The `NKOI_PER_KOI` constant (10^9) is defined in the Rust source (`currency::NKOI_PER_KOI`) and used wherever amounts are constructed programmatically. SQL seed data uses literal nKoi values with inline comments showing the Koi equivalent.
+
+Plan 20 does not change the denomination — commitments hide nKoi values. The unit is the same; only the visibility changes.
 
 ## Decisions to Make
 
@@ -365,7 +398,6 @@ These functions compose with standard SQL — you can join their results, filter
 - **ltree path format:** How to derive the path string. Proposed: `{module}.{package}.{file}.{kind}_{name}` e.g. `myproject.auth.handler.funcDecl_validateToken`. Exact format can evolve.
 - **Schema versioning:** Use a simple `schema_version` table with an integer version, plus numbered migration scripts. No ORM.
 - **Instance naming:** How to generate the default instance name. Proposed: derive from hostname + project name, e.g. `billys-macbook.myproject`. User can override.
-- **Currency denomination:** The base unit is called **Koi** (好意, Japanese for "favor"). Like kerai (家来, "staff"), the name reflects the system's ethos — agents performing favors for each other, tracked as fungible value. The unit is abstract — it represents compute-equivalent value.
 - **Mint rate:** How much value is created per unit of work? Proposed: defer specifics. For Plan 01, the ledger and pricing tables exist but the mint policy is undefined. The first real mint policy arrives with Plan 08 (AI perspectives) when there's actual compute to account for.
 - **Signature canonicalization:** What exact bytes are signed for an operation? Proposed: JSON canonical form of (node_id, operation, payload fields, author, timestamp), sorted keys, no whitespace. This must be defined precisely and never change, since signatures are verified against it.
 - **Reproduction estimate methodology:** How does an instance estimate reproduction cost? Proposed: initially, a simple multiplier on actual compute cost (e.g., 10-20x for novel discoveries, 1-2x for routine analysis). Smarter estimation comes when the market provides feedback — if your knowledge sells consistently, your estimates are roughly right; if nobody buys, they're too high.
@@ -387,11 +419,11 @@ This avoids a painful migration when distribution and federation arrive in later
 
 Three things are baked into the foundation because retrofitting them is prohibitively costly:
 
-1. **Key pairs.** Every instance has an Ed25519 identity from birth. Without this, nothing can be signed or verified. Adding signatures later means all historical operations are unverifiable — a trust gap that can't be closed.
+1. **Key pairs.** Every instance has an Ed25519 identity from birth. Without this, nothing can be signed or verified. Adding signatures later means all historical operations are unverifiable — a trust gap that can't be closed. The choice of Ed25519 (Curve25519) is also forward-looking: Plan 20's Bulletproofs operate on the same curve, enabling zK proofs to share key material and verification infrastructure with the identity layer. One cryptographic foundation serves signing, verification, and privacy.
 
 2. **Signed operations.** Every version record carries a signature. This is the provenance guarantee for the entire network. When instance B receives operations from instance A, it can verify they actually came from A. This is the root of trust for the economic layer.
 
-3. **Ledger and pricing tables.** They can sit empty until multiple instances exchange data (Plan 06) or AI perspectives are computed (Plan 08). But the schema is ready, the indexes exist, and when value starts flowing, there's no migration needed.
+3. **Ledger and pricing tables.** They can sit empty until multiple instances exchange data (Plan 06) or AI perspectives are computed (Plan 08). But the schema is ready, the indexes exist, and when value starts flowing, there's no migration needed. Plan 20 adds the private ledger alongside the plaintext ledger — the foundation schema doesn't change, it gains a sibling.
 
 The CRDT operation log is already a distributed, append-only, causally-ordered log with convergence guarantees — structurally, it's a ledger. Adding cryptographic identity and economic transactions extends it naturally rather than bolting on a separate system. The currency is grounded in verifiable work (compute spent producing perspectives, running tests, answering queries), not speculative value.
 
@@ -405,10 +437,12 @@ The attestation and challenge tables lay the groundwork for a self-sustaining kn
 4. **Cost implies value** (pricing, ledger) — Plan 01
 5. **Value implies a market** (attestations, challenges) — Plan 01
 6. **A market implies autonomous actors** (agent swarms producing and consuming knowledge) — Plan 09
+7. **Value implies privacy** (private balances, shielded transfers) — Plan 20
+8. **Privacy implies a boundary** (bridge to external currencies, selective disclosure) — Plan 11
 
 Each step follows from the previous without a conceptual break. The schema supports the full chain from day one.
 
-The key economic insight: knowledge is worth roughly what it would cost to independently reproduce. An instance that spent 85,000 Koi discovering a complex optimization can price it just below reproduction cost. The ZK proof layer (initially `attestation-only`, later real ZK proofs) solves the inspection paradox — buyers can verify the claim has value without receiving the knowledge. AI agents on both sides of the transaction handle pricing, negotiation, and settlement autonomously, with the currency acting as a coordination signal that prioritizes where compute should be invested.
+The key economic insight: knowledge is worth roughly what it would cost to independently reproduce. An instance that spent 85,000 Koi discovering a complex optimization can price it just below reproduction cost. The ZK proof layer (initially `attestation-only`, later PLONK and Bulletproofs) solves the inspection paradox — buyers can verify the claim has value without receiving the knowledge. AI agents on both sides of the transaction handle pricing, negotiation, and settlement autonomously, with the currency acting as a coordination signal that prioritizes where compute should be invested.
 
 ## Design Note: All Knowledge Trends Toward Open
 
@@ -444,8 +478,10 @@ This is a self-expiring patent system that runs on market forces instead of lega
 - The `perspectives` and `associations` tables for AI (Plan 08)
 - Exchange protocol (how payments are negotiated during cross-instance queries — Plan 06)
 - Mint policy (how much value is created per unit of work — Plan 08/09)
-- ZK proof generation and verification (proof_data and response_proof columns are ready; the math comes later)
+- ZK proof generation and verification (proof_data and response_proof columns are ready; the math comes in Plans 10 and 20)
 - Dutch auction mechanism, simultaneous release, open-source floor (Plan 10)
-- Fraud detection, double-spend prevention, dispute resolution (needs a working multi-instance network)
+- Private ledger, commitments, nullifiers, double-spend prevention (Plan 20 — the plaintext ledger is sufficient for single-instance and trusted-network operation)
+- USDC bridge and external currency exchange (Plan 11)
 - Autonomous pricing agents (AI that sets prices based on market signals — Plan 09)
+- Fuchi wallet client (Plan 20 — client-side key management, commitment inventory, viewing keys)
 - Wallet CLI commands (Plan 05)
