@@ -214,11 +214,17 @@ fn parallel_parse(path: &str, max_workers: default!(i32, 0)) -> pgrx::JsonB {
     let num_cpus = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(4);
+    let pg_bg_limit = Spi::get_one::<i32>(
+        "SELECT COALESCE(current_setting('pg_background.max_workers', true)::int, 16)",
+    )
+    .unwrap_or(Some(16))
+    .unwrap_or(16) as usize;
     let pool_size = if max_workers > 0 {
         max_workers as usize
     } else {
         num_cpus
-    };
+    }
+    .min(pg_bg_limit);
 
     if !root.exists() {
         pgrx::error!("Path does not exist: {}", path);
@@ -260,9 +266,10 @@ fn parallel_parse(path: &str, max_workers: default!(i32, 0)) -> pgrx::JsonB {
         let file_path = entry.path();
         let abs_path = file_path.to_string_lossy().replace('\'', "''");
         let filename = file_path
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_default();
+            .strip_prefix(root)
+            .unwrap_or(file_path)
+            .to_string_lossy()
+            .to_string();
 
         let ext = file_path
             .extension()
