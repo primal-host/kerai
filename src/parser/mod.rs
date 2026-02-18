@@ -32,7 +32,7 @@ use kinds::Kind;
 use path_builder::PathContext;
 
 /// Get the self instance ID from the database.
-fn get_self_instance_id() -> String {
+pub(crate) fn get_self_instance_id() -> String {
     Spi::get_one::<String>("SELECT id::text FROM kerai.instances WHERE is_self = true")
         .expect("Failed to query self instance")
         .expect("No self instance found — run kerai.bootstrap_instance() first")

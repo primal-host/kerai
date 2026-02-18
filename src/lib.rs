@@ -4,6 +4,7 @@ mod agents;
 mod bootstrap;
 mod bounties;
 mod consensus;
+mod crawler;
 mod crdt;
 mod currency;
 mod economy;
