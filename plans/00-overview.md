@@ -19,7 +19,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 │  │   └─ 10 ZK Marketplace ← 06 + 08           │
 │  ├─ 07 Code Queries ←─────── 05               │
 │  │   └─ 08 AI Perspectives ← 01 + 04 + 07 ───┘
-│  └─ 11 External Economy ←── 05 + 10
+│  └─ 11 External Economy ←── 05 + 10 + 20
 │
 │  12 Knowledge Editor ←──── 01 + 02 + 04 + 06 + 08
 │
@@ -45,7 +45,7 @@ Each plan builds on the ones before it. The dependency chain is linear through t
 | [08](08-ai-perspectives.md) | AI Perspectives | 01, 04, 07 | Weighted nodes, agent views, knowledge valuation, compute cost tracking |
 | [09](09-agent-swarms.md) | Agent Swarms | 04, 06, 08 | Massive concurrent agents, autonomous pricing, market participation |
 | [10](10-zk-marketplace.md) | ZK Marketplace | 06, 08 | Zero-knowledge proofs, Dutch auctions, simultaneous release, open-source floor |
-| [11](11-external-economy.md) | External Economy | 05, 10 | Wallets, token bridge, exchange listing, bounties, fiat on/off ramps |
+| [11](11-external-economy.md) | External Economy | 05, 10, 20 | USDC bridge as privacy boundary, Fuchi wallet, selective disclosure, bounties, fiat on/off ramps |
 | [12](12-kerai-web.md) | Knowledge Editor | 01, 02, 04, 06, 08 | Web-based editor, document parsers, AI-assisted writing, corpus ingestion, real-time collaboration |
 | [13](13-microgpt.md) | MicroGPT | 01 | Tiny transformer model running inside Postgres for local inference |
 | [14](14-native-currency.md) | Native Currency | 01 | Koi token minting, wallets, transfers, reward schedules |
