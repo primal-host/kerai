@@ -142,13 +142,15 @@ CREATE INDEX idx_wallets_type ON kerai.wallets (wallet_type);
 );
 
 // Table: ledger — immutable transaction log
+// All amounts are in nKoi (nano-Koi): 1 Koi = 1,000,000,000 nKoi (10^9).
+// 9 whole digits + implicit decimal + 9 fractional digits, stored as BIGINT.
 extension_sql!(
     r#"
 CREATE TABLE kerai.ledger (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     from_wallet     UUID REFERENCES kerai.wallets(id),
     to_wallet       UUID NOT NULL REFERENCES kerai.wallets(id),
-    amount          BIGINT NOT NULL CHECK (amount > 0),
+    amount          BIGINT NOT NULL CHECK (amount > 0),  -- nKoi
     reason          TEXT NOT NULL,
     reference_id    UUID,
     reference_type  TEXT,
@@ -177,7 +179,7 @@ CREATE TABLE kerai.pricing (
     instance_id   UUID NOT NULL REFERENCES kerai.instances(id),
     resource_type TEXT NOT NULL,
     scope         ltree,
-    unit_cost     BIGINT NOT NULL,
+    unit_cost     BIGINT NOT NULL,  -- nKoi
     unit_type     TEXT NOT NULL DEFAULT 'token',
     metadata      JSONB DEFAULT '{}'::jsonb,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -542,7 +544,7 @@ extension_sql!(
 CREATE TABLE kerai.reward_schedule (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     work_type   TEXT NOT NULL UNIQUE,
-    reward      BIGINT NOT NULL CHECK (reward > 0),
+    reward      BIGINT NOT NULL CHECK (reward > 0),  -- nKoi
     enabled     BOOLEAN NOT NULL DEFAULT true,
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -557,7 +559,7 @@ extension_sql!(
 CREATE TABLE kerai.reward_log (
     id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     work_type   TEXT NOT NULL,
-    reward      BIGINT NOT NULL,
+    reward      BIGINT NOT NULL,  -- nKoi
     wallet_id   UUID NOT NULL REFERENCES kerai.wallets(id),
     details     JSONB DEFAULT '{}'::jsonb,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -590,18 +592,18 @@ CREATE INDEX idx_repositories_name ON kerai.repositories (name);
     requires = ["table_instances", "table_nodes"]
 );
 
-// Seed data: default reward schedule
+// Seed data: default reward schedule (amounts in nKoi; 1 Koi = 1,000,000,000 nKoi)
 extension_sql!(
     r#"
 INSERT INTO kerai.reward_schedule (work_type, reward) VALUES
-    ('parse_file', 10),
-    ('parse_crate', 50),
-    ('parse_markdown', 10),
-    ('create_version', 5),
-    ('bounty_settlement', 20),
-    ('peer_sync', 15),
-    ('model_training', 25),
-    ('mirror_repo', 100);
+    ('parse_file',        10000000000),  -- 10 Koi
+    ('parse_crate',       50000000000),  -- 50 Koi
+    ('parse_markdown',    10000000000),  -- 10 Koi
+    ('create_version',     5000000000),  --  5 Koi
+    ('bounty_settlement', 20000000000),  -- 20 Koi
+    ('peer_sync',         15000000000),  -- 15 Koi
+    ('model_training',    25000000000),  -- 25 Koi
+    ('mirror_repo',      100000000000);  -- 100 Koi
 "#,
     name = "seed_reward_schedule",
     requires = ["table_reward_schedule"]
