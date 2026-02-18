@@ -149,7 +149,7 @@ CREATE TABLE wallets (
 
 Every instance gets a wallet automatically (linked via `instance_id`). But wallets can also exist independently — a human holding Koi, an AI agent with its own balance, or a bridge entity exchanging Koi for USDC. The wallet's identity is its Ed25519 public key, the same cryptographic primitive used throughout kerai. This separation allows the currency to flow beyond instance-to-instance transactions (Plan 11).
 
-The wallet table is the server-side identity record. Under Plan 20, wallets gain client-side state managed by Fuchi (spending keys, viewing keys, commitment inventory). The server-side table does not change — Fuchi extends the wallet with private data that never enters Postgres.
+The wallet table is the server-side identity record. Under Plan 14, wallets gain client-side state managed by Fuchi (spending keys, viewing keys, commitment inventory). The server-side table does not change — Fuchi extends the wallet with private data that never enters Postgres.
 
 **`ledger`** — economic transactions between wallets
 
@@ -172,7 +172,7 @@ CREATE TABLE ledger (
 
 This is the plaintext ledger — the starting point. Value is minted by verifiable work — computing perspectives, running tests, producing operations. The mint is not arbitrary: the `reference_id` points to the work product, and any instance can verify the work exists and is signed. Payments for knowledge access are signed by the paying wallet.
 
-Plan 20 adds a `private_ledger` alongside this table, storing Pedersen commitments instead of plaintext amounts. Both coexist — users choose to "shield" Koi into the private ledger or operate in plaintext. Over time, the private ledger becomes the default path. The plaintext ledger remains for transparency-by-choice and backward compatibility.
+Plan 14 adds a `private_ledger` alongside this table, storing Pedersen commitments instead of plaintext amounts. Both coexist — users choose to "shield" Koi into the private ledger or operate in plaintext. Over time, the private ledger becomes the default path. The plaintext ledger remains for transparency-by-choice and backward compatibility.
 
 **`pricing`** — what does this instance charge?
 
@@ -217,7 +217,7 @@ CREATE TABLE attestations (
 
 Attestations are the marketplace layer. An instance advertises what it knows — scope, significance, cost basis, estimated reproduction difficulty, and asking price — without revealing the knowledge itself. Other instances browse attestations, verify proofs (when available), negotiate, pay, and receive disclosure. The `proof_data` column is null until ZK proof generation is implemented; the schema is ready for it.
 
-The `proof_type` values align with the proof systems chosen in Plans 10 and 20: PLONK for complex circuits (knowledge attestation, mint verification), Bulletproofs for range proofs (funding sufficiency, balance conservation). Both share the same Curve25519 foundation as the Ed25519 identity layer.
+The `proof_type` values align with the proof systems chosen in Plans 10 and 14: PLONK for complex circuits (knowledge attestation, mint verification), Bulletproofs for range proofs (funding sufficiency, balance conservation). Both share the same Curve25519 foundation as the Ed25519 identity layer.
 
 The `reproduction_est` is the natural pricing anchor: knowledge is worth roughly what it would cost someone else to independently rediscover. A zero-day is worth more because reproduction requires the same expensive discovery process. A trivial formatting preference is worth almost nothing because any agent could arrive at it in seconds.
 
@@ -244,7 +244,7 @@ CREATE TABLE challenges (
 
 Challenges are how buyers verify claims before paying. A challenger says "prove your knowledge does X for my state Y" and the attester either proves it (ZK or otherwise) or doesn't. Settlement happens when both parties agree on price and the knowledge is disclosed.
 
-Under Plan 20, the `offered_price` and `settled_price` remain plaintext (these are selective disclosures — the market needs to see them). But the actual payment at settlement uses the private ledger: the challenger's Fuchi generates a transfer proof rather than a plaintext ledger entry.
+Under Plan 14, the `offered_price` and `settled_price` remain plaintext (these are selective disclosures — the market needs to see them). But the actual payment at settlement uses the private ledger: the challenger's Fuchi generates a transfer proof rather than a plaintext ledger entry.
 
 ### 1.3 Key Generation
 
@@ -259,7 +259,7 @@ $PGDATA/kerai/
 
 Ed25519 is chosen for: fast signing (important when signing every operation), small keys (32 bytes), small signatures (64 bytes), and wide library support. The `ed25519-dalek` crate is the standard Rust implementation — pure Rust, no C dependencies, constant-time operations.
 
-The curve choice is deliberate: Ed25519 operates on Curve25519. Plan 20's Bulletproofs use the same curve for range proofs and balance conservation proofs. One curve, two purposes — signing (Ed25519) and privacy (Bulletproofs). The `curve25519-dalek` crate serves both, sharing key material and verification infrastructure. This is not a coincidence; it's why Ed25519 was chosen over alternatives like secp256k1.
+The curve choice is deliberate: Ed25519 operates on Curve25519. Plan 14's Bulletproofs use the same curve for range proofs and balance conservation proofs. One curve, two purposes — signing (Ed25519) and privacy (Bulletproofs). The `curve25519-dalek` crate serves both, sharing key material and verification infrastructure. This is not a coincidence; it's why Ed25519 was chosen over alternatives like secp256k1.
 
 ### 1.4 Indexes
 
@@ -316,7 +316,7 @@ CREATE INDEX idx_nodes_metadata ON nodes USING gin(metadata);
 CREATE INDEX idx_nodes_kind ON nodes(kind);
 ```
 
-Plan 20 adds indexes for the `private_ledger` (nullifier uniqueness, epoch ordering) and `nullifiers` table. These are additive — no existing indexes change.
+Plan 14 adds indexes for the `private_ledger` (nullifier uniqueness, epoch ordering) and `nullifiers` table. These are additive — no existing indexes change.
 
 ### 1.5 Verification Queries
 
@@ -369,9 +369,9 @@ SELECT kerai.attest('pkg.auth', compute_cost := 4200, reproduction_est := 85000)
 SELECT kerai.auction(attestation_id, start := 80000, floor := 0);
 SELECT kerai.bid(auction_id, max_price := 35000);
 
--- Wallet operations (Plans 11, 14, 20)
+-- Wallet operations (Plans 11, 14)
 SELECT kerai.wallet_balance();                   -- plaintext mode: queries ledger directly
-                                                  -- private mode (Plan 20): delegates to Fuchi
+                                                  -- private mode (Plan 14): delegates to Fuchi
 SELECT kerai.total_supply();                     -- sum of all mint amounts (always public)
 SELECT kerai.supply_info();                      -- aggregate stats, no individual balances
 ```
@@ -390,7 +390,7 @@ The native currency is **Koi**. All monetary amounts in the schema are denominat
 
 The `NKOI_PER_KOI` constant (10^9) is defined in the Rust source (`currency::NKOI_PER_KOI`) and used wherever amounts are constructed programmatically. SQL seed data uses literal nKoi values with inline comments showing the Koi equivalent.
 
-Plan 20 does not change the denomination — commitments hide nKoi values. The unit is the same; only the visibility changes.
+Plan 14 does not change the denomination — commitments hide nKoi values. The unit is the same; only the visibility changes.
 
 ## Decisions to Make
 
@@ -419,11 +419,11 @@ This avoids a painful migration when distribution and federation arrive in later
 
 Three things are baked into the foundation because retrofitting them is prohibitively costly:
 
-1. **Key pairs.** Every instance has an Ed25519 identity from birth. Without this, nothing can be signed or verified. Adding signatures later means all historical operations are unverifiable — a trust gap that can't be closed. The choice of Ed25519 (Curve25519) is also forward-looking: Plan 20's Bulletproofs operate on the same curve, enabling zK proofs to share key material and verification infrastructure with the identity layer. One cryptographic foundation serves signing, verification, and privacy.
+1. **Key pairs.** Every instance has an Ed25519 identity from birth. Without this, nothing can be signed or verified. Adding signatures later means all historical operations are unverifiable — a trust gap that can't be closed. The choice of Ed25519 (Curve25519) is also forward-looking: Plan 14's Bulletproofs operate on the same curve, enabling zK proofs to share key material and verification infrastructure with the identity layer. One cryptographic foundation serves signing, verification, and privacy.
 
 2. **Signed operations.** Every version record carries a signature. This is the provenance guarantee for the entire network. When instance B receives operations from instance A, it can verify they actually came from A. This is the root of trust for the economic layer.
 
-3. **Ledger and pricing tables.** They can sit empty until multiple instances exchange data (Plan 06) or AI perspectives are computed (Plan 08). But the schema is ready, the indexes exist, and when value starts flowing, there's no migration needed. Plan 20 adds the private ledger alongside the plaintext ledger — the foundation schema doesn't change, it gains a sibling.
+3. **Ledger and pricing tables.** They can sit empty until multiple instances exchange data (Plan 06) or AI perspectives are computed (Plan 08). But the schema is ready, the indexes exist, and when value starts flowing, there's no migration needed. Plan 14 adds the private ledger alongside the plaintext ledger — the foundation schema doesn't change, it gains a sibling.
 
 The CRDT operation log is already a distributed, append-only, causally-ordered log with convergence guarantees — structurally, it's a ledger. Adding cryptographic identity and economic transactions extends it naturally rather than bolting on a separate system. The currency is grounded in verifiable work (compute spent producing perspectives, running tests, answering queries), not speculative value.
 
@@ -437,7 +437,7 @@ The attestation and challenge tables lay the groundwork for a self-sustaining kn
 4. **Cost implies value** (pricing, ledger) — Plan 01
 5. **Value implies a market** (attestations, challenges) — Plan 01
 6. **A market implies autonomous actors** (agent swarms producing and consuming knowledge) — Plan 09
-7. **Value implies privacy** (private balances, shielded transfers) — Plan 20
+7. **Value implies privacy** (private balances, shielded transfers) — Plan 14
 8. **Privacy implies a boundary** (bridge to external currencies, selective disclosure) — Plan 11
 
 Each step follows from the previous without a conceptual break. The schema supports the full chain from day one.
@@ -478,10 +478,10 @@ This is a self-expiring patent system that runs on market forces instead of lega
 - The `perspectives` and `associations` tables for AI (Plan 08)
 - Exchange protocol (how payments are negotiated during cross-instance queries — Plan 06)
 - Mint policy (how much value is created per unit of work — Plan 08/09)
-- ZK proof generation and verification (proof_data and response_proof columns are ready; the math comes in Plans 10 and 20)
+- ZK proof generation and verification (proof_data and response_proof columns are ready; the math comes in Plans 10 and 14)
 - Dutch auction mechanism, simultaneous release, open-source floor (Plan 10)
-- Private ledger, commitments, nullifiers, double-spend prevention (Plan 20 — the plaintext ledger is sufficient for single-instance and trusted-network operation)
+- Private ledger, commitments, nullifiers, double-spend prevention (Plan 14 — the plaintext ledger is sufficient for single-instance and trusted-network operation)
 - USDC bridge and external currency exchange (Plan 11)
 - Autonomous pricing agents (AI that sets prices based on market signals — Plan 09)
-- Fuchi wallet client (Plan 20 — client-side key management, commitment inventory, viewing keys)
+- Fuchi wallet client (Plan 14 — client-side key management, commitment inventory, viewing keys)
 - Wallet CLI commands (Plan 05)

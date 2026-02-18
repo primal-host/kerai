@@ -1,13 +1,13 @@
 # Plan 10: ZK Marketplace
 
 *Depends on: Plan 06 (Distribution), Plan 08 (AI Perspectives)*
-*Enables: Plan 11 (External Economy), Plan 20 (ZK Currency)*
+*Enables: Plan 11 (External Economy), Plan 14 (ZK Currency)*
 
 ## Goal
 
 Implement the zero-knowledge proof layer and Dutch auction mechanism that allow instances to prove they possess valuable knowledge, auction it to interested buyers, release it simultaneously to all successful bidders, and open-source it when the price hits the floor. At the end of this plan, the kerai network has a self-regulating knowledge economy where all knowledge trends toward open.
 
-Plan 20 (ZK Currency) later upgrades the payment layer from plaintext ledger entries to private commitments. This plan is designed to work in both modes — the auction schema, pricing, and settlement logic are the same; only the payment implementation changes.
+Plan 14 (ZK Currency) later upgrades the payment layer from plaintext ledger entries to private commitments. This plan is designed to work in both modes — the auction schema, pricing, and settlement logic are the same; only the payment implementation changes.
 
 ## The Core Principle: All Knowledge Trends Toward Open
 
@@ -53,7 +53,7 @@ CREATE TABLE kerai.bids (
     auction_id      UUID NOT NULL REFERENCES kerai.auctions(id),
     bidder_wallet   UUID NOT NULL REFERENCES kerai.wallets(id),
     max_price       BIGINT NOT NULL,        -- nKoi (public: the auction needs this)
-    funding_proof   BYTEA,                  -- zK proof of sufficient funds (Plan 20, NULL in plaintext mode)
+    funding_proof   BYTEA,                  -- zK proof of sufficient funds (Plan 14, NULL in plaintext mode)
     signature       BYTEA NOT NULL,         -- signed commitment to pay
     created_at      TIMESTAMPTZ DEFAULT now()
 );
@@ -68,8 +68,8 @@ CREATE INDEX idx_bids_bidder ON kerai.bids(bidder_wallet);
 
 The `funding_proof` column bridges the two modes:
 
-- **Plaintext mode (without Plan 20):** NULL. The system checks `balance >= max_price` directly from the ledger at settlement time. A bidder who overpromises fails at settlement.
-- **Private mode (with Plan 20):** A zK proof demonstrating the bidder owns commitments worth >= `max_price`, without revealing total balance. Verified at bid submission time. A bidder cannot bid more than they hold.
+- **Plaintext mode (without Plan 14):** NULL. The system checks `balance >= max_price` directly from the ledger at settlement time. A bidder who overpromises fails at settlement.
+- **Private mode (with Plan 14):** A zK proof demonstrating the bidder owns commitments worth >= `max_price`, without revealing total balance. Verified at bid submission time. A bidder cannot bid more than they hold.
 
 **How the Dutch clock works:**
 
@@ -143,7 +143,7 @@ Two categories of zK proofs serve different purposes in the marketplace:
 
 Without revealing: the specific operations, the specific nodes, the actual weights, or the perspective content.
 
-**Currency proofs** (Plan 20) — prove properties of holdings without revealing balances:
+**Currency proofs** (Plan 14) — prove properties of holdings without revealing balances:
 
 - **Funding**: "I own commitments worth >= X nKoi" (for bid funding proofs)
 - **Transfer**: "This payment is valid and I had sufficient funds" (for settlement)
@@ -158,7 +158,7 @@ Both categories share the same cryptographic infrastructure:
 -- Generate a ZK proof for a knowledge attestation
 SELECT kerai.generate_knowledge_proof(attestation_id);
 
--- Generate a ZK funding proof for a bid (Plan 20)
+-- Generate a ZK funding proof for a bid (Plan 14)
 -- (called by Fuchi, not kerai directly)
 
 -- Verify any proof received from another instance
@@ -264,13 +264,13 @@ This is the point where AI agents participate on both sides of the market — pr
 
 **The open-source floor creates a natural pressure toward generosity.** An instance sitting on knowledge and pricing it too high watches the clock tick down toward free. Better to settle at a reasonable price than receive nothing when the floor hits. This keeps the market efficient and prevents knowledge hoarding.
 
-**Privacy and bidding strategy (with Plan 20):** In plaintext mode, other bidders could infer exposure — "this wallet committed 100,000 Koi across three auctions, they might not cover this one." In private mode, that inference is impossible. Bidders can diversify across multiple auctions without revealing their total commitment. This makes the market more efficient (no penalty for diversification) but makes funding proofs essential — without them, a bidder could commit to more than they hold across concurrent auctions.
+**Privacy and bidding strategy (with Plan 14):** In plaintext mode, other bidders could infer exposure — "this wallet committed 100,000 Koi across three auctions, they might not cover this one." In private mode, that inference is impossible. Bidders can diversify across multiple auctions without revealing their total commitment. This makes the market more efficient (no penalty for diversification) but makes funding proofs essential — without them, a bidder could commit to more than they hold across concurrent auctions.
 
 The funding proof solves this: at bid time, the bidder proves they own sufficient uncommitted funds. If they bid on multiple auctions, each funding proof must reference distinct unspent commitments. Double-committing the same commitment to two bids is prevented by the nullifier mechanism — if both auctions settle, one payment will fail because its input commitment was already nullified by the other.
 
 ## Decisions to Make
 
-- **ZK library alignment:** Plan 20 proposes Bulletproofs (range proofs) + PLONK (complex circuits). Knowledge proofs are complex circuits (query execution traces). Proposed: PLONK for both knowledge and mint proofs, Bulletproofs for range/funding proofs. Shared trusted setup, shared verification infrastructure.
+- **ZK library alignment:** Plan 14 proposes Bulletproofs (range proofs) + PLONK (complex circuits). Knowledge proofs are complex circuits (query execution traces). Proposed: PLONK for both knowledge and mint proofs, Bulletproofs for range/funding proofs. Shared trusted setup, shared verification infrastructure.
 - **Post-settlement open delay:** How long after settlement before knowledge goes open to the network? Proposed: configurable per-auction, default 24 hours. This gives buyers a brief exclusive window. Set to 0 for immediate open-sourcing after settlement.
 - **Floor price = 0 as default:** Should all auctions eventually go open? Proposed: yes, default `floor_price = 0`. Sellers can set a non-zero floor if they want minimum compensation, but the design ethos is that all knowledge trends toward open.
 - **Multi-auction for same knowledge:** Can an instance run multiple auctions for the same attestation (different buyer groups, different price schedules)? Proposed: no, one auction per attestation. Prevents seller from double-dipping. If the auction expires, a new one can be created.

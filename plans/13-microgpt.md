@@ -49,7 +49,7 @@ Each gradient update produces an `update_model_weights` CRDT op with a base64-en
 
 Training mints Koi (produces value). Inference costs Koi (consumes value). Bounties can commission model training on specific ltree scopes. All amounts are denominated in nKoi (1 Koi = 1,000,000,000 nKoi).
 
-*Under Plan 20, training rewards are minted as Pedersen commitments rather than plaintext ledger entries. The reward amount remains public (tied to the verifiable training run in `training_runs`), but the recipient's accumulated balance is private. Inference costs are deducted via private transfers — the agent's Fuchi-equivalent generates a proof that the agent can afford the inference, without revealing total holdings. The `cost_koi` field in `inference_log` records the public cost (needed for market pricing); the actual payment is a nullified commitment.*
+*Under Plan 14, training rewards are minted as Pedersen commitments rather than plaintext ledger entries. The reward amount remains public (tied to the verifiable training run in `training_runs`), but the recipient's accumulated balance is private. Inference costs are deducted via private transfers — the agent's Fuchi-equivalent generates a proof that the agent can afford the inference, without revealing total holdings. The `cost_koi` field in `inference_log` records the public cost (needed for market pricing); the actual payment is a nullified commitment.*
 
 ## Module Structure
 
@@ -109,7 +109,7 @@ CREATE UNLOGGED TABLE kerai.inference_log (
     predicted     UUID NOT NULL,
     score         DOUBLE PRECISION NOT NULL,
     selected      BOOLEAN DEFAULT false,
-    cost_koi      BIGINT DEFAULT 0,           -- nKoi (public cost for pricing; actual payment is a private commitment under Plan 20)
+    cost_koi      BIGINT DEFAULT 0,           -- nKoi (public cost for pricing; actual payment is a private commitment under Plan 14)
     created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ```

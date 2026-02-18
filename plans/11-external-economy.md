@@ -1,11 +1,11 @@
 # Plan 11: External Economy
 
-*Depends on: Plan 05 (CLI), Plan 10 (ZK Marketplace), Plan 20 (ZK Currency)*
+*Depends on: Plan 05 (CLI), Plan 10 (ZK Marketplace), Plan 14 (ZK Currency)*
 *Enables: human and AI participation in the knowledge economy beyond kerai instances*
 
 ## Goal
 
-Bridge the private Koi economy to the external world — USDC exchange, price discovery, and fiat on/off ramps. Inside the kerai network, Koi transactions are fully private (Plan 20). The bridge is the sole point where privacy is deliberately sacrificed. At the end of this plan, humans can enter the Koi economy (buying Koi with USDC), participate privately (holding, transferring, commissioning work), and exit (converting Koi back to USDC) — with privacy preserved everywhere except at the bridge boundary.
+Bridge the private Koi economy to the external world — USDC exchange, price discovery, and fiat on/off ramps. Inside the kerai network, Koi transactions are fully private (Plan 14). The bridge is the sole point where privacy is deliberately sacrificed. At the end of this plan, humans can enter the Koi economy (buying Koi with USDC), participate privately (holding, transferring, commissioning work), and exit (converting Koi back to USDC) — with privacy preserved everywhere except at the bridge boundary.
 
 ## Why This Is Inevitable
 
@@ -20,7 +20,7 @@ Ignoring this creates a shadow economy. Planning for it channels the inevitable 
 
 ## The Privacy Boundary
 
-Plan 20 establishes that all Koi transactions are private — balances are Pedersen commitments, transfers are zK proofs, double-spending is prevented by nullifiers. Nobody reading the database can determine who holds what or who sent what to whom.
+Plan 14 establishes that all Koi transactions are private — balances are Pedersen commitments, transfers are zK proofs, double-spending is prevented by nullifiers. Nobody reading the database can determine who holds what or who sent what to whom.
 
 The external world (USDC, exchanges, fiat) is inherently transparent. The bridge is where these two worlds meet:
 
@@ -39,7 +39,7 @@ This is a deliberate, user-initiated choice. Nobody is forced to bridge. You can
 
 ### 11.1 Fuchi Wallet
 
-Fuchi (Plan 20.7) is the client-side wallet that manages private Koi. The external economy extends it with bridge operations:
+Fuchi (Plan 14.7) is the client-side wallet that manages private Koi. The external economy extends it with bridge operations:
 
 ```bash
 # Create a wallet (spending key, viewing key, commitment inventory)
@@ -264,7 +264,7 @@ No custom fiat integration needed initially — the external exchange ecosystem 
 
 ### Supply
 
-- **No pre-mine — provably.** Every Koi traces to a mint proof tied to verified work. The mint circuit (Plan 20.3) guarantees this cryptographically. There is no way to mint without a valid work proof. No founder's allocation, no VC tokens, no genesis block with pre-distributed coins.
+- **No pre-mine — provably.** Every Koi traces to a mint proof tied to verified work. The mint circuit (Plan 14.3) guarantees this cryptographically. There is no way to mint without a valid work proof. No founder's allocation, no VC tokens, no genesis block with pre-distributed coins.
 - **Inflationary.** New Koi are minted as work is done. The inflation rate is bounded by the amount of actual compute happening in the network. More work = more Koi, but also more knowledge produced and more utility backing each Koi.
 - **Deflationary pressure from open-sourcing.** As knowledge goes open (Dutch auction floor), the exclusive value it backed returns to the Koi Pond. Koi spent acquiring that knowledge don't disappear, but the knowledge that gave them utility is now free. This creates natural deflationary pressure.
 - **Auditable aggregate, private individual.** Total supply is provable by summing all mint proof amounts (public). Individual holdings are private (shielded commitments). External observers can verify total supply and mint rate without seeing who holds what.
