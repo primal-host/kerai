@@ -1,11 +1,81 @@
-# Plan 20: ZK Currency
+# Plan 14: ZK Currency
 
-*Depends on: Plan 01 (Foundation), Plan 10 (ZK Marketplace), Plan 14 (Native Currency)*
+*Depends on: Plan 01 (Foundation), Plan 10 (ZK Marketplace)*
 *Enables: Plan 11 (External Economy)*
 
 ## Goal
 
 Replace the plaintext Koi ledger with a zero-knowledge proof layer where balances, transfers, and minting are fully private inside the kerai network. External currencies (USDC) are exchanged at a bridge that is the sole point where privacy is deliberately sacrificed. At the end of this plan, Koi transactions are cryptographically private, verifiable without revealing amounts or participants, and bridgeable to the external world only by explicit user choice.
+
+## The Plaintext Layer (What Exists)
+
+The plaintext Koi currency is already implemented. It works as a complete currency system on its own. This plan upgrades it from plaintext to private — transfers become zK proofs, replay protection moves from nonces to nullifiers, and balances become Pedersen commitments. Both modes coexist; users choose when to shield.
+
+### Schema
+
+- **`kerai.reward_schedule`** — configurable emission rates per work type, amounts in nKoi:
+  - parse_file = 10,000,000,000 (10 Koi)
+  - parse_crate = 50,000,000,000 (50 Koi)
+  - parse_markdown = 10,000,000,000 (10 Koi)
+  - create_version = 5,000,000,000 (5 Koi)
+  - bounty_settlement = 20,000,000,000 (20 Koi)
+  - peer_sync = 15,000,000,000 (15 Koi)
+  - model_training = 25,000,000,000 (25 Koi)
+  - mirror_repo = 100,000,000,000 (100 Koi)
+- **`kerai.reward_log`** — audit trail for auto-mints with work_type, reward (nKoi), wallet_id, details
+- **`kerai.wallets.nonce`** — BIGINT column for replay protection on signed transfers
+
+### Currency Module — `src/currency.rs`
+
+9 `pg_extern` functions:
+- **`register_wallet(public_key_hex, wallet_type, label?)`** — Accept Ed25519 public key (hex, 64 chars), compute fingerprint, INSERT wallet. No private key touches the server.
+- **`signed_transfer(from, to, amount, nonce, signature_hex, reason?)`** — Verify Ed25519 signature over `"transfer:{from}:{to}:{amount}:{nonce}"`, check nonce = wallet.nonce + 1, validate balance, INSERT ledger, increment nonce. Remains for plaintext-mode transfers.
+- **`total_supply()`** — Sum all mints. Returns `{total_supply, total_minted, total_transactions}`. Unaffected by shielding — mint amounts are always public (tied to verifiable work metrics).
+- **`wallet_share(wallet_id)`** — Returns `{wallet_id, balance, total_supply, share}` where share is a decimal string. Only operates on unshielded balances. Shielded balances are invisible to the server — only Fuchi knows them.
+- **`supply_info()`** — Rich overview: total_supply, wallet_count, top holders, recent mints. "Top holders" reveals only plaintext-mode balances. The private ledger provides aggregate-only alternatives that don't disclose individual holdings.
+- **`mint_reward(work_type, details?)`** — Looks up reward_schedule, mints to self instance wallet, logs to reward_log. After this plan, minting creates a commitment instead of a plaintext ledger entry. The hook and reward_log stay the same; the ledger target changes.
+- **`evaluate_mining()`** — Periodic evaluation for unrewarded work (retroactive parsing, versions). Bonus amounts use `NKOI_PER_KOI` constant (1 Koi per node, capped at 100 Koi).
+- **`get_reward_schedule()`** — List all reward schedule entries.
+- **`set_reward(work_type, reward, enabled?)`** — Create or update a reward schedule entry.
+
+### Auto-Mint Hooks
+
+- `parse_crate()` → `mint_reward('parse_crate', ...)`
+- `parse_file()` → `mint_reward('parse_file', ...)`
+- `parse_source()` → `mint_reward('parse_file', ...)`
+- `parse_markdown()` → `mint_reward('parse_markdown', ...)`
+
+These hooks stay the same — the mint target changes from plaintext ledger to commitment, but the trigger mechanism is identical.
+
+### CRDT Op Types
+
+3 op types in `src/crdt/operations.rs`:
+- `register_wallet` — replicate wallet registration (unchanged by this plan)
+- `signed_transfer` — replicate signed transfers with signature (plaintext mode only; the private ledger replicates proof + commitment + nullifier instead)
+- `mint_reward` — replicate mint + reward_log entry (changes to commitment + mint proof)
+
+### Key Design Decisions
+
+1. **Client-side key custody**: `register_wallet` accepts a public key hex string. The server never sees or stores private keys. This aligns directly with Fuchi's model — the private key stays client-side, extended with viewing keys and commitment inventory.
+2. **Signed transfers**: Message format `"transfer:{from}:{to}:{amount}:{nonce}"` — deterministic, nonce provides replay protection. The private ledger uses nullifiers instead — a fundamentally different replay protection mechanism suited to the commitment model.
+3. **Proportional supply**: Total supply grows continuously with work. No inflation schedule or halving. Mint proofs still tie supply growth to verifiable work. Individual mint amounts become commitments while aggregate supply remains publicly auditable.
+4. **Configurable reward schedule**: Instance owners tune emission rates per work type. Defaults seeded at extension creation. All amounts in nKoi.
+5. **Curve25519 alignment**: Ed25519 signed transfers operate on Curve25519 — the same curve used by Bulletproofs for range proofs and balance conservation. The cryptographic foundation is shared.
+
+### Files Implementing the Plaintext Layer
+
+| File | Action | Description |
+|---|---|---|
+| `src/schema.rs` | Modified | reward_schedule, reward_log tables + seed data (nKoi); wallets nonce column |
+| `src/currency.rs` | Created | 9 pg_extern functions, `NKOI_PER_KOI` constant |
+| `src/parser/mod.rs` | Modified | Auto-mint hooks in parse_crate/parse_file/parse_source |
+| `src/parser/markdown/mod.rs` | Modified | Auto-mint hook in parse_markdown |
+| `src/crdt/operations.rs` | Modified | 3 new op types + apply handlers |
+| `src/functions/status.rs` | Modified | total_supply + instance_balance in status JSON |
+| `src/lib.rs` | Modified | mod currency + 17 tests |
+| `cli/src/commands/currency.rs` | Created | CLI currency subcommands |
+| `cli/src/commands/mod.rs` | Modified | Currency module + Command variants |
+| `cli/src/main.rs` | Modified | CurrencyAction enum + dispatch |
 
 ## The Core Principle: Privacy Inside the Pond
 
@@ -35,7 +105,7 @@ Encrypt memos           CRDT-sync commitments    Public ledger here
 
 ## Deliverables
 
-### 20.1 Commitment Scheme
+### 14.1 Commitment Scheme
 
 Replace plaintext amounts with Pedersen commitments. A commitment `C = v*G + r*H` hides the value `v` behind a random blinding factor `r`. Nobody reading the database can determine balances.
 
@@ -65,7 +135,7 @@ CREATE INDEX idx_private_ledger_epoch ON kerai.private_ledger (epoch);
 
 Each entry proves: the sender owned sufficient Koi, the amounts balance (inputs = outputs + fee), no coins were created from nothing, and no double-spending occurred — all without revealing sender, receiver, or amount.
 
-### 20.2 Private Transfers
+### 14.2 Private Transfers
 
 A transfer from Alice to Bob:
 
@@ -83,7 +153,7 @@ A transfer from Alice to Bob:
 
 **What kerai sees:** valid proof, opaque commitments, nullifiers. **What kerai doesn't see:** who sent what to whom, or how much.
 
-### 20.3 Private Minting
+### 14.3 Private Minting
 
 When kerai mints Koi for work (parsing, perspectives, bounties), it needs to prove:
 
@@ -105,7 +175,7 @@ The mint creates a new commitment with no input nullifier (coins from nothing, l
 
 This matters for CRDT sync: instance B can verify instance A's mints are legitimate without seeing A's private data. The proof is the receipt.
 
-### 20.4 Nullifier Set
+### 14.4 Nullifier Set
 
 Double-spend prevention without revealing which commitment is being spent:
 
@@ -125,7 +195,7 @@ CREATE TABLE kerai.nullifiers (
 
 The nullifier set grows monotonically. It syncs via CRDT across instances — a nullifier published on any instance is eventually known to all.
 
-### 20.5 Proof System
+### 14.5 Proof System
 
 **Proposed: Bulletproofs** for range proofs and balance verification.
 
@@ -142,7 +212,7 @@ For more complex proofs (minting verification, work attestation), **PLONK** via 
 
 The split: Bulletproofs for transfer range proofs (no setup), PLONK for mint/work proofs (universal setup controlled by the network).
 
-### 20.6 USDC Bridge
+### 14.6 USDC Bridge
 
 The bridge is where privacy ends and external liquidity begins.
 
@@ -173,7 +243,7 @@ Koi (commitments)  <──lock───  Amount + Identity <──burn── USD
 
 **The privacy boundary is clean:** inside the pond, everything is commitments and proofs. The bridge is the only place where amounts become visible, and only because the external world requires it.
 
-### 20.7 Wallet State (Fuchi)
+### 14.7 Wallet State (Fuchi)
 
 Fuchi manages the client-side secrets that make privacy work:
 
@@ -195,7 +265,7 @@ Fuchi manages the client-side secrets that make privacy work:
 
 Loss of the spending key means loss of funds (same as any crypto wallet). Loss of the viewing key means loss of transaction history but not funds. The commitment inventory can be reconstructed by scanning the ledger with the viewing key.
 
-### 20.8 Migration Path
+### 14.8 Migration Path
 
 The current plaintext ledger continues to work. The private ledger runs alongside it. Users choose when to "shield" their Koi:
 
@@ -205,6 +275,20 @@ The current plaintext ledger continues to work. The private ledger runs alongsid
 4. **Plaintext transfer:** Current ledger behavior (unchanged)
 
 Over time, as Fuchi matures, the plaintext ledger becomes the legacy path and shielded becomes the default. No forced migration — users opt in to privacy.
+
+## Plaintext vs Private
+
+| Aspect | Plaintext (current) | Private (this plan) |
+|--------|--------------------|---------------------|
+| Amounts | Visible in ledger | Hidden in commitments |
+| Transfers | Ed25519 signature | zK proof |
+| Replay protection | Nonce (sequential) | Nullifier (one-time) |
+| Balance query | `SUM(amount)` from ledger | Fuchi scans with viewing key |
+| Minting | Plaintext ledger entry | Commitment with mint proof |
+| CRDT replication | Amount + signature | Proof + commitment + nullifier |
+| Supply audit | `SUM(amount) WHERE from_wallet IS NULL` | Sum of mint proof amounts (public) |
+
+Users shield Koi by transferring from the plaintext ledger to a commitment (14.8). They unshield by revealing a commitment back. Both layers share the same denomination (nKoi), the same reward schedule, and the same curve (Curve25519).
 
 ## Proof Circuits
 
@@ -259,7 +343,7 @@ Constraints:
 
 ## Denomination
 
-All amounts inside commitments are denominated in nKoi (nano-Koi). 1 Koi = 1,000,000,000 nKoi. This is the same convention used by the plaintext ledger (Plan 14). The commitment hides the nKoi value; the bridge reveals it when exiting to USDC.
+All amounts inside commitments are denominated in nKoi (nano-Koi). 1 Koi = 1,000,000,000 nKoi. This is the same convention used by the plaintext ledger. The commitment hides the nKoi value; the bridge reveals it when exiting to USDC.
 
 ## CRDT Sync Implications
 
@@ -288,3 +372,4 @@ A receiving instance verifies each proof before accepting it into its local ledg
 - Regulatory compliance framework for the bridge (KYC/AML — depends on jurisdiction and bridge operator model)
 - Cross-chain bridges to currencies other than USDC (one bridge first, others follow the same pattern)
 - Hardware wallet integration for spending key custody
+- Fuchi client implementation (separate plan — this plan defines what Fuchi needs to do; the Fuchi plan covers how)
