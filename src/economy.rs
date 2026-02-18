@@ -1,4 +1,7 @@
 /// Economy — wallet management, kōi transfers, and minting.
+///
+/// All monetary amounts are denominated in nKoi (nano-Koi).
+/// 1 Koi = 1,000,000,000 nKoi (10^9). See currency::NKOI_PER_KOI.
 use pgrx::prelude::*;
 
 use crate::identity;
@@ -200,7 +203,7 @@ fn transfer_koi(
 
     if balance < amount {
         error!(
-            "Insufficient balance: wallet {} has {} kōi but transfer requires {}",
+            "Insufficient balance: wallet {} has {} nKoi but transfer requires {}",
             from_wallet_id, balance, amount
         );
     }
