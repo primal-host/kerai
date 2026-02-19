@@ -1,7 +1,11 @@
 mod commands;
 mod config;
 mod db;
+mod home;
 mod output;
+
+use std::collections::HashMap;
+use std::env;
 
 use clap::{Parser, Subcommand};
 use output::OutputFormat;
@@ -27,6 +31,87 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum CliCommand {
+    /// Postgres AST operations — init, ping, query, find, tree, etc.
+    Postgres {
+        #[command(subcommand)]
+        action: PostgresAction,
+    },
+
+    /// Sync CRDT operations with peers
+    Sync {
+        #[command(subcommand)]
+        action: SyncAction,
+    },
+
+    /// Agent perspective views
+    Perspective {
+        #[command(subcommand)]
+        action: PerspectiveAction,
+    },
+
+    /// Multi-agent consensus views
+    Consensus {
+        #[command(subcommand)]
+        action: ConsensusAction,
+    },
+
+    /// Manage peer instances
+    Peer {
+        #[command(subcommand)]
+        action: PeerAction,
+    },
+
+    /// Manage AI agents
+    Agent {
+        #[command(subcommand)]
+        action: AgentAction,
+    },
+
+    /// Manage swarm tasks
+    Task {
+        #[command(subcommand)]
+        action: TaskAction,
+    },
+
+    /// Manage agent swarms
+    Swarm {
+        #[command(subcommand)]
+        action: SwarmAction,
+    },
+
+    /// Knowledge marketplace — auctions, bids, Koi Pond
+    Market {
+        #[command(subcommand)]
+        action: MarketAction,
+    },
+
+    /// Manage Koi wallets
+    Wallet {
+        #[command(subcommand)]
+        action: WalletAction,
+    },
+
+    /// Manage bounties
+    Bounty {
+        #[command(subcommand)]
+        action: BountyAction,
+    },
+
+    /// Native currency — registration, signed transfers, supply, mining
+    Currency {
+        #[command(subcommand)]
+        action: CurrencyAction,
+    },
+
+    /// Manage MicroGPT neural models
+    Model {
+        #[command(subcommand)]
+        action: ModelAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PostgresAction {
     /// Initialize a project: create config and parse crate
     Init {
         /// Path to project root (defaults to current directory)
@@ -73,18 +158,6 @@ enum CliCommand {
         message: Option<String>,
     },
 
-    /// Manage peer instances
-    Peer {
-        #[command(subcommand)]
-        action: PeerAction,
-    },
-
-    /// Sync CRDT operations with a peer
-    Sync {
-        /// Peer name to sync with
-        peer: String,
-    },
-
     /// Search AST nodes by content pattern
     Find {
         /// Search pattern (ILIKE syntax, e.g. %hello%)
@@ -110,15 +183,21 @@ enum CliCommand {
         /// ltree path pattern (subtree or lquery with wildcards)
         path: Option<String>,
     },
+}
 
-    /// Manage AI agents
-    Agent {
-        #[command(subcommand)]
-        action: AgentAction,
+#[derive(Subcommand)]
+enum SyncAction {
+    /// Sync with a peer
+    Run {
+        /// Peer name to sync with
+        peer: String,
     },
+}
 
-    /// Show an agent's perspectives
-    Perspective {
+#[derive(Subcommand)]
+enum PerspectiveAction {
+    /// List an agent's perspectives
+    List {
         /// Agent name
         agent: String,
 
@@ -130,9 +209,12 @@ enum CliCommand {
         #[arg(long)]
         min_weight: Option<f64>,
     },
+}
 
-    /// Show multi-agent consensus
-    Consensus {
+#[derive(Subcommand)]
+enum ConsensusAction {
+    /// Show multi-agent consensus status
+    Status {
         /// Filter by context node ID
         #[arg(long)]
         context: Option<String>,
@@ -144,48 +226,6 @@ enum CliCommand {
         /// Minimum average weight threshold
         #[arg(long)]
         min_weight: Option<f64>,
-    },
-
-    /// Manage swarm tasks
-    Task {
-        #[command(subcommand)]
-        action: TaskAction,
-    },
-
-    /// Manage agent swarms
-    Swarm {
-        #[command(subcommand)]
-        action: SwarmAction,
-    },
-
-    /// Knowledge marketplace — auctions, bids, Koi Pond
-    Market {
-        #[command(subcommand)]
-        action: MarketAction,
-    },
-
-    /// Manage Koi wallets
-    Wallet {
-        #[command(subcommand)]
-        action: WalletAction,
-    },
-
-    /// Manage bounties
-    Bounty {
-        #[command(subcommand)]
-        action: BountyAction,
-    },
-
-    /// Native currency — registration, signed transfers, supply, mining
-    Currency {
-        #[command(subcommand)]
-        action: CurrencyAction,
-    },
-
-    /// Manage MicroGPT neural models
-    Model {
-        #[command(subcommand)]
-        action: ModelAction,
     },
 }
 
@@ -744,18 +784,131 @@ enum CurrencyAction {
     },
 }
 
+/// Known global flags that take a value argument.
+const FLAGS_WITH_VALUE: &[&str] = &["--db", "--profile", "--format"];
+
+/// Rewrites argv so that dot-namespaced commands become space-separated subcommands.
+///
+/// `kerai postgres.query "SQL"` → `["kerai", "postgres", "query", "SQL"]`
+/// `kerai pg.query "SQL"`       → `["kerai", "postgres", "query", "SQL"]` (via alias)
+/// `kerai postgres query "SQL"` → unchanged (already space-separated)
+fn rewrite_args(
+    args: impl Iterator<Item = String>,
+    aliases: &HashMap<String, String>,
+) -> Vec<String> {
+    let args: Vec<String> = args.collect();
+    let mut result = Vec::with_capacity(args.len() + 1);
+
+    // Always keep program name
+    if let Some(prog) = args.first() {
+        result.push(prog.clone());
+    }
+
+    let mut i = 1;
+    let mut found_positional = false;
+
+    while i < args.len() {
+        let arg = &args[i];
+
+        // Skip flags and their values
+        if arg.starts_with('-') {
+            result.push(arg.clone());
+            if FLAGS_WITH_VALUE.contains(&arg.as_str()) {
+                i += 1;
+                if i < args.len() {
+                    result.push(args[i].clone());
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        // First positional arg: check for dot notation
+        if !found_positional && arg.contains('.') {
+            found_positional = true;
+            if let Some((ns, cmd)) = arg.split_once('.') {
+                let expanded = aliases.get(ns).map_or(ns, |v| v.as_str());
+                result.push(expanded.to_string());
+                result.push(cmd.to_string());
+                i += 1;
+                continue;
+            }
+        }
+
+        // Non-dot positional or subsequent args: expand alias on first positional only
+        if !found_positional {
+            found_positional = true;
+            let expanded = aliases.get(arg.as_str()).map_or(arg.clone(), |v| v.clone());
+            result.push(expanded);
+        } else {
+            result.push(arg.clone());
+        }
+        i += 1;
+    }
+
+    result
+}
+
 fn main() {
-    let cli = Cli::parse();
+    // Set up ~/.kerai/ and load aliases (non-fatal on failure)
+    let aliases = match home::ensure_home_dir() {
+        Ok(home) => {
+            let _ = home::ensure_aliases_file(&home);
+            home::load_aliases(&home).unwrap_or_default()
+        }
+        Err(_) => HashMap::new(),
+    };
+
+    let args = rewrite_args(env::args(), &aliases);
+    let cli = Cli::parse_from(args);
 
     let command = match cli.command {
-        CliCommand::Init { path } => commands::Command::Init { path },
-        CliCommand::Ping => commands::Command::Ping,
-        CliCommand::Info => commands::Command::Info,
-        CliCommand::Version => commands::Command::Version,
-        CliCommand::Query { sql } => commands::Command::Query { sql },
-        CliCommand::Checkout { file } => commands::Command::Checkout { file },
-        CliCommand::Log { author, limit } => commands::Command::Log { author, limit },
-        CliCommand::Commit { message } => commands::Command::Commit { message },
+        CliCommand::Postgres { action } => match action {
+            PostgresAction::Init { path } => commands::Command::Init { path },
+            PostgresAction::Ping => commands::Command::Ping,
+            PostgresAction::Info => commands::Command::Info,
+            PostgresAction::Version => commands::Command::Version,
+            PostgresAction::Query { sql } => commands::Command::Query { sql },
+            PostgresAction::Checkout { file } => commands::Command::Checkout { file },
+            PostgresAction::Log { author, limit } => commands::Command::Log { author, limit },
+            PostgresAction::Commit { message } => commands::Command::Commit { message },
+            PostgresAction::Find {
+                pattern,
+                kind,
+                limit,
+            } => commands::Command::Find {
+                pattern,
+                kind,
+                limit,
+            },
+            PostgresAction::Refs { symbol } => commands::Command::Refs { symbol },
+            PostgresAction::Tree { path } => commands::Command::Tree { path },
+        },
+        CliCommand::Sync { action } => match action {
+            SyncAction::Run { peer } => commands::Command::Sync { peer },
+        },
+        CliCommand::Perspective { action } => match action {
+            PerspectiveAction::List {
+                agent,
+                context,
+                min_weight,
+            } => commands::Command::Perspective {
+                agent,
+                context_id: context,
+                min_weight,
+            },
+        },
+        CliCommand::Consensus { action } => match action {
+            ConsensusAction::Status {
+                context,
+                min_agents,
+                min_weight,
+            } => commands::Command::Consensus {
+                context_id: context,
+                min_agents,
+                min_weight,
+            },
+        },
         CliCommand::Peer { action } => match action {
             PeerAction::Add {
                 name,
@@ -772,18 +925,6 @@ fn main() {
             PeerAction::Remove { name } => commands::Command::PeerRemove { name },
             PeerAction::Info { name } => commands::Command::PeerInfo { name },
         },
-        CliCommand::Sync { peer } => commands::Command::Sync { peer },
-        CliCommand::Find {
-            pattern,
-            kind,
-            limit,
-        } => commands::Command::Find {
-            pattern,
-            kind,
-            limit,
-        },
-        CliCommand::Refs { symbol } => commands::Command::Refs { symbol },
-        CliCommand::Tree { path } => commands::Command::Tree { path },
         CliCommand::Agent { action } => match action {
             AgentAction::Add { name, kind, model } => commands::Command::AgentAdd {
                 name,
@@ -793,24 +934,6 @@ fn main() {
             AgentAction::List { kind } => commands::Command::AgentList { kind },
             AgentAction::Remove { name } => commands::Command::AgentRemove { name },
             AgentAction::Info { name } => commands::Command::AgentInfo { name },
-        },
-        CliCommand::Perspective {
-            agent,
-            context,
-            min_weight,
-        } => commands::Command::Perspective {
-            agent,
-            context_id: context,
-            min_weight,
-        },
-        CliCommand::Consensus {
-            context,
-            min_agents,
-            min_weight,
-        } => commands::Command::Consensus {
-            context_id: context,
-            min_agents,
-            min_weight,
         },
         CliCommand::Task { action } => match action {
             TaskAction::Create {
@@ -1052,5 +1175,58 @@ fn main() {
     if let Err(e) = commands::run(command, &cli.profile, cli.db.as_deref(), &cli.format) {
         eprintln!("Error: {e}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(s: &str) -> impl Iterator<Item = String> {
+        s.split_whitespace().map(String::from).collect::<Vec<_>>().into_iter()
+    }
+
+    #[test]
+    fn dot_notation_expands() {
+        let aliases = HashMap::new();
+        let result = rewrite_args(args("kerai postgres.query SELECT"), &aliases);
+        assert_eq!(result, vec!["kerai", "postgres", "query", "SELECT"]);
+    }
+
+    #[test]
+    fn alias_expands_dot_notation() {
+        let mut aliases = HashMap::new();
+        aliases.insert("pg".to_string(), "postgres".to_string());
+        let result = rewrite_args(args("kerai pg.query SELECT"), &aliases);
+        assert_eq!(result, vec!["kerai", "postgres", "query", "SELECT"]);
+    }
+
+    #[test]
+    fn space_form_unchanged() {
+        let aliases = HashMap::new();
+        let result = rewrite_args(args("kerai postgres query SELECT"), &aliases);
+        assert_eq!(result, vec!["kerai", "postgres", "query", "SELECT"]);
+    }
+
+    #[test]
+    fn alias_expands_space_form() {
+        let mut aliases = HashMap::new();
+        aliases.insert("pg".to_string(), "postgres".to_string());
+        let result = rewrite_args(args("kerai pg query SELECT"), &aliases);
+        assert_eq!(result, vec!["kerai", "postgres", "query", "SELECT"]);
+    }
+
+    #[test]
+    fn flags_before_subcommand() {
+        let aliases = HashMap::new();
+        let result = rewrite_args(args("kerai --db mydb --format json postgres.ping"), &aliases);
+        assert_eq!(result, vec!["kerai", "--db", "mydb", "--format", "json", "postgres", "ping"]);
+    }
+
+    #[test]
+    fn no_dot_no_alias_passthrough() {
+        let aliases = HashMap::new();
+        let result = rewrite_args(args("kerai peer list"), &aliases);
+        assert_eq!(result, vec!["kerai", "peer", "list"]);
     }
 }
