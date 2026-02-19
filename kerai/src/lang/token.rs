@@ -1,8 +1,17 @@
+/// Structural kind for a token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TokenKind {
+    Word,
+    LParen,
+    RParen,
+}
+
 /// A single token from a kerai line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub value: String,
     pub quoted: bool,
+    pub kind: TokenKind,
 }
 
 /// Tokenize a line by splitting on whitespace, respecting quoted strings.
@@ -11,6 +20,7 @@ pub struct Token {
 /// - Backslash escapes inside quotes: `\"`, `\'`, `\\`
 /// - Quotes are stripped from the value; `quoted` is set to `true`
 /// - Dot-namespaced identifiers (e.g. `postgres.global.connection`) are naturally one token
+/// - `(` and `)` are structural delimiters (LParen/RParen), unless quoted
 pub fn tokenize(line: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut chars = line.chars().peekable();
@@ -18,6 +28,26 @@ pub fn tokenize(line: &str) -> Vec<Token> {
     while let Some(&ch) = chars.peek() {
         if ch.is_whitespace() {
             chars.next();
+            continue;
+        }
+
+        // Parentheses as structural delimiters
+        if ch == '(' {
+            chars.next();
+            tokens.push(Token {
+                value: "(".to_string(),
+                quoted: false,
+                kind: TokenKind::LParen,
+            });
+            continue;
+        }
+        if ch == ')' {
+            chars.next();
+            tokens.push(Token {
+                value: ")".to_string(),
+                quoted: false,
+                kind: TokenKind::RParen,
+            });
             continue;
         }
 
@@ -49,11 +79,12 @@ pub fn tokenize(line: &str) -> Vec<Token> {
             tokens.push(Token {
                 value,
                 quoted: true,
+                kind: TokenKind::Word,
             });
         } else {
             let mut value = String::new();
             while let Some(&c) = chars.peek() {
-                if c.is_whitespace() {
+                if c.is_whitespace() || c == '(' || c == ')' {
                     break;
                 }
                 value.push(c);
@@ -62,6 +93,7 @@ pub fn tokenize(line: &str) -> Vec<Token> {
             tokens.push(Token {
                 value,
                 quoted: false,
+                kind: TokenKind::Word,
             });
         }
     }
@@ -79,6 +111,7 @@ mod tests {
         assert_eq!(tokens.len(), 2);
         assert_eq!(tokens[0].value, "hello");
         assert!(!tokens[0].quoted);
+        assert_eq!(tokens[0].kind, TokenKind::Word);
         assert_eq!(tokens[1].value, "world");
     }
 
@@ -90,6 +123,7 @@ mod tests {
         assert!(!tokens[0].quoted);
         assert_eq!(tokens[1].value, "hello world");
         assert!(tokens[1].quoted);
+        assert_eq!(tokens[1].kind, TokenKind::Word);
     }
 
     #[test]
@@ -154,5 +188,46 @@ mod tests {
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].value, "unterminated");
         assert!(tokens[0].quoted);
+    }
+
+    #[test]
+    fn paren_delimiters() {
+        let tokens = tokenize("(1 + 2) * 3");
+        assert_eq!(tokens.len(), 7);
+        assert_eq!(tokens[0].kind, TokenKind::LParen);
+        assert_eq!(tokens[0].value, "(");
+        assert_eq!(tokens[1].value, "1");
+        assert_eq!(tokens[1].kind, TokenKind::Word);
+        assert_eq!(tokens[2].value, "+");
+        assert_eq!(tokens[3].value, "2");
+        assert_eq!(tokens[4].kind, TokenKind::RParen);
+        assert_eq!(tokens[4].value, ")");
+        assert_eq!(tokens[5].value, "*");
+        assert_eq!(tokens[6].value, "3");
+    }
+
+    #[test]
+    fn adjacent_paren_breaks_word() {
+        let tokens = tokenize("foo(bar)");
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(tokens[0].value, "foo");
+        assert_eq!(tokens[0].kind, TokenKind::Word);
+        assert_eq!(tokens[1].kind, TokenKind::LParen);
+        assert_eq!(tokens[2].value, "bar");
+        assert_eq!(tokens[2].kind, TokenKind::Word);
+        assert_eq!(tokens[3].kind, TokenKind::RParen);
+    }
+
+    #[test]
+    fn quoted_paren_not_special() {
+        let tokens = tokenize(r#""(" hello ")""#);
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].value, "(");
+        assert!(tokens[0].quoted);
+        assert_eq!(tokens[0].kind, TokenKind::Word);
+        assert_eq!(tokens[1].value, "hello");
+        assert_eq!(tokens[2].value, ")");
+        assert!(tokens[2].quoted);
+        assert_eq!(tokens[2].kind, TokenKind::Word);
     }
 }
