@@ -6,7 +6,7 @@ use crate::lang;
 
 const DEFAULT_ALIASES: &str = "\
 # common aliases for kerai libraries
-:pg postgres
+pg: postgres
 ";
 
 /// Creates `~/.kerai/` if it doesn't exist, returns its path.
@@ -45,7 +45,7 @@ pub fn load_aliases(home: &Path) -> Result<HashMap<String, String>, String> {
 
 const KERAI_FILE_HEADER: &str = "\
 # kerai-controlled configuration — do not hand-edit
-# syntax: :name target (definition) | name arg (function call) | name: type (reserved)
+# syntax: name: target (definition) | name arg (function call) | :name expr (type application)
 ";
 
 /// Creates `kerai.kerai` with header comment if missing, returns its path.
