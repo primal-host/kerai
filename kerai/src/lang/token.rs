@@ -4,6 +4,8 @@ pub enum TokenKind {
     Word,
     LParen,
     RParen,
+    LBracket,
+    RBracket,
 }
 
 /// A single token from a kerai line.
@@ -51,6 +53,25 @@ pub fn tokenize(line: &str) -> Vec<Token> {
             continue;
         }
 
+        if ch == '[' {
+            chars.next();
+            tokens.push(Token {
+                value: "[".to_string(),
+                quoted: false,
+                kind: TokenKind::LBracket,
+            });
+            continue;
+        }
+        if ch == ']' {
+            chars.next();
+            tokens.push(Token {
+                value: "]".to_string(),
+                quoted: false,
+                kind: TokenKind::RBracket,
+            });
+            continue;
+        }
+
         if ch == '\'' || ch == '"' {
             let quote = ch;
             chars.next(); // consume opening quote
@@ -84,7 +105,7 @@ pub fn tokenize(line: &str) -> Vec<Token> {
         } else {
             let mut value = String::new();
             while let Some(&c) = chars.peek() {
-                if c.is_whitespace() || c == '(' || c == ')' {
+                if c.is_whitespace() || c == '(' || c == ')' || c == '[' || c == ']' {
                     break;
                 }
                 value.push(c);
@@ -216,6 +237,57 @@ mod tests {
         assert_eq!(tokens[2].value, "bar");
         assert_eq!(tokens[2].kind, TokenKind::Word);
         assert_eq!(tokens[3].kind, TokenKind::RParen);
+    }
+
+    #[test]
+    fn bracket_delimiters() {
+        let tokens = tokenize("[1 2 3]");
+        assert_eq!(tokens.len(), 5);
+        assert_eq!(tokens[0].kind, TokenKind::LBracket);
+        assert_eq!(tokens[0].value, "[");
+        assert_eq!(tokens[1].value, "1");
+        assert_eq!(tokens[1].kind, TokenKind::Word);
+        assert_eq!(tokens[2].value, "2");
+        assert_eq!(tokens[3].value, "3");
+        assert_eq!(tokens[4].kind, TokenKind::RBracket);
+        assert_eq!(tokens[4].value, "]");
+    }
+
+    #[test]
+    fn adjacent_bracket_breaks_word() {
+        let tokens = tokenize("foo[bar]");
+        assert_eq!(tokens.len(), 4);
+        assert_eq!(tokens[0].value, "foo");
+        assert_eq!(tokens[0].kind, TokenKind::Word);
+        assert_eq!(tokens[1].kind, TokenKind::LBracket);
+        assert_eq!(tokens[2].value, "bar");
+        assert_eq!(tokens[2].kind, TokenKind::Word);
+        assert_eq!(tokens[3].kind, TokenKind::RBracket);
+    }
+
+    #[test]
+    fn quoted_bracket_not_special() {
+        let tokens = tokenize(r#""[" hello "]""#);
+        assert_eq!(tokens.len(), 3);
+        assert_eq!(tokens[0].value, "[");
+        assert!(tokens[0].quoted);
+        assert_eq!(tokens[0].kind, TokenKind::Word);
+        assert_eq!(tokens[1].value, "hello");
+        assert_eq!(tokens[2].value, "]");
+        assert!(tokens[2].quoted);
+        assert_eq!(tokens[2].kind, TokenKind::Word);
+    }
+
+    #[test]
+    fn nested_brackets() {
+        let tokens = tokenize("[[1] 2]");
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(tokens[0].kind, TokenKind::LBracket);
+        assert_eq!(tokens[1].kind, TokenKind::LBracket);
+        assert_eq!(tokens[2].value, "1");
+        assert_eq!(tokens[3].kind, TokenKind::RBracket);
+        assert_eq!(tokens[4].value, "2");
+        assert_eq!(tokens[5].kind, TokenKind::RBracket);
     }
 
     #[test]
