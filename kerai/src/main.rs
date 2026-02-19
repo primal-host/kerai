@@ -817,8 +817,9 @@ const NOTATION_SWITCHES: &[(&str, lang::Notation)] = &[
 
 /// Try to evaluate args as a calculator expression.
 /// Runs on raw args (before `rewrite_args`) so notation switches like `.a` aren't mangled.
-/// Returns `Some(result_string)` if evaluation happened, `None` to fall through to clap.
-fn try_eval(args: &[String], aliases: &HashMap<String, String>) -> Option<String> {
+/// Returns `Some(Ok(value))` for computed results, `Some(Err(expr))` for non-numeric results,
+/// or `None` to fall through to clap.
+fn try_eval(args: &[String], aliases: &HashMap<String, String>) -> Option<Result<String, String>> {
     // Extract positional args (skip program name, skip flags and their values)
     let mut positionals = Vec::new();
     let mut i = 1; // skip program name
@@ -877,7 +878,10 @@ fn try_eval(args: &[String], aliases: &HashMap<String, String>) -> Option<String
 
     let expr = lang::parse_expr(&source, notation)?;
     let value = lang::eval::eval(&expr);
-    Some(value.to_string())
+    match value {
+        lang::eval::Value::Str(s) => Some(Err(s)),
+        _ => Some(Ok(value.to_string())),
+    }
 }
 
 /// Rewrites argv so that dot-namespaced commands become space-separated subcommands.
@@ -957,8 +961,16 @@ fn main() {
 
     // Try calculator/eval mode on raw args (before rewrite mangles notation switches)
     if let Some(result) = try_eval(&raw_args, &aliases) {
-        println!("{result}");
-        return;
+        match result {
+            Ok(value) => {
+                println!("{value}");
+                return;
+            }
+            Err(expr) => {
+                eprintln!("error: expression did not evaluate\n{expr}");
+                std::process::exit(1);
+            }
+        }
     }
 
     let args = rewrite_args(raw_args.into_iter(), &aliases);
@@ -1345,53 +1357,64 @@ mod tests {
 
     #[test]
     fn eval_simple_addition() {
-        assert_eq!(try_eval(&sv("kerai 3 + 4"), &no_aliases()), Some("7".into()));
+        assert_eq!(try_eval(&sv("kerai 3 + 4"), &no_aliases()), Some(Ok("7".into())));
     }
 
     #[test]
     fn eval_precedence() {
-        assert_eq!(try_eval(&sv("kerai 2 + 3 * 4"), &no_aliases()), Some("14".into()));
+        assert_eq!(try_eval(&sv("kerai 2 + 3 * 4"), &no_aliases()), Some(Ok("14".into())));
     }
 
     #[test]
     fn eval_postfix_switch() {
-        assert_eq!(try_eval(&sv("kerai .post 3 4 +"), &no_aliases()), Some("7".into()));
+        assert_eq!(try_eval(&sv("kerai .post 3 4 +"), &no_aliases()), Some(Ok("7".into())));
     }
 
     #[test]
     fn eval_postfix_chained() {
-        assert_eq!(try_eval(&sv("kerai .a 1 2 3 * +"), &no_aliases()), Some("7".into()));
+        assert_eq!(try_eval(&sv("kerai .a 1 2 3 * +"), &no_aliases()), Some(Ok("7".into())));
     }
 
     #[test]
     fn eval_prefix_switch() {
-        assert_eq!(try_eval(&sv("kerai .pre + 3 4"), &no_aliases()), Some("7".into()));
+        assert_eq!(try_eval(&sv("kerai .pre + 3 4"), &no_aliases()), Some(Ok("7".into())));
     }
 
     #[test]
     fn eval_prefix_nested() {
-        assert_eq!(try_eval(&sv("kerai .b + 1 * 2 3"), &no_aliases()), Some("7".into()));
+        assert_eq!(try_eval(&sv("kerai .b + 1 * 2 3"), &no_aliases()), Some(Ok("7".into())));
     }
 
     #[test]
     fn eval_hex_literal() {
-        assert_eq!(try_eval(&sv("kerai 0xFF"), &no_aliases()), Some("255".into()));
+        assert_eq!(try_eval(&sv("kerai 0xFF"), &no_aliases()), Some(Ok("255".into())));
     }
 
     #[test]
     fn eval_integer_division() {
-        assert_eq!(try_eval(&sv("kerai 10 / 3"), &no_aliases()), Some("3".into()));
+        assert_eq!(try_eval(&sv("kerai 10 / 3"), &no_aliases()), Some(Ok("3".into())));
     }
 
     #[test]
     fn eval_float_division() {
-        let result = try_eval(&sv("kerai 10.0 / 3"), &no_aliases()).unwrap();
+        let result = try_eval(&sv("kerai 10.0 / 3"), &no_aliases()).unwrap().unwrap();
         assert!(result.starts_with("3.333333333333333"));
     }
 
     #[test]
-    fn eval_string_passthrough() {
-        assert_eq!(try_eval(&sv("kerai hello"), &no_aliases()), Some("hello".into()));
+    fn eval_bare_word_is_error() {
+        assert_eq!(try_eval(&sv("kerai hello"), &no_aliases()), Some(Err("hello".into())));
+    }
+
+    #[test]
+    fn eval_non_numeric_expr_is_error() {
+        // 3 + foo can't compute — eval returns Str
+        assert!(matches!(try_eval(&sv("kerai 3 + foo"), &no_aliases()), Some(Err(_))));
+    }
+
+    #[test]
+    fn eval_div_by_zero_is_error() {
+        assert_eq!(try_eval(&sv("kerai 1 / 0"), &no_aliases()), Some(Err("division by zero".into())));
     }
 
     #[test]
@@ -1413,7 +1436,7 @@ mod tests {
 
     #[test]
     fn eval_skips_flags() {
-        assert_eq!(try_eval(&sv("kerai --db mydb 3 + 4"), &no_aliases()), Some("7".into()));
+        assert_eq!(try_eval(&sv("kerai --db mydb 3 + 4"), &no_aliases()), Some(Ok("7".into())));
     }
 
     #[test]
