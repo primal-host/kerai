@@ -1,4 +1,5 @@
 pub mod documents;
+pub mod eval;
 pub mod health;
 pub mod models;
 pub mod nodes;
@@ -56,7 +57,12 @@ pub fn build_router(pool: Arc<Pool>, notify_tx: broadcast::Sender<String>) -> Ro
         .route("/ws", get(ws::ws_handler))
         .with_state(ws_state);
 
+    let eval_router = Router::new()
+        .route("/eval", post(eval::eval));
+
     Router::new()
+        .route("/", get(eval::terminal_page))
         .nest("/api", api)
         .nest("/api", ws_router)
+        .nest("/api", eval_router)
 }
