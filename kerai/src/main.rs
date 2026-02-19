@@ -139,9 +139,9 @@ enum PostgresAction {
         sql: String,
     },
 
-    /// Reconstruct source files from AST
-    Checkout {
-        /// Reconstruct a single file by name
+    /// Export source files reconstructed from AST
+    Export {
+        /// Export a single file by name
         #[arg(long)]
         file: Option<String>,
     },
@@ -877,7 +877,7 @@ fn main() {
             PostgresAction::Info => commands::Command::Info,
             PostgresAction::Version => commands::Command::Version,
             PostgresAction::Query { sql } => commands::Command::Query { sql },
-            PostgresAction::Checkout { file } => commands::Command::Checkout { file },
+            PostgresAction::Export { file } => commands::Command::Export { file },
             PostgresAction::Log { author, limit } => commands::Command::Log { author, limit },
             PostgresAction::Commit { message } => commands::Command::Commit { message },
             PostgresAction::Find {

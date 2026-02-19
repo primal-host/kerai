@@ -1,6 +1,6 @@
 pub mod agent;
 pub mod bounty;
-pub mod checkout;
+pub mod export;
 pub mod commit;
 pub mod connect;
 pub mod consensus_cmd;
@@ -40,7 +40,7 @@ pub enum Command {
     Query {
         sql: String,
     },
-    Checkout {
+    Export {
         file: Option<String>,
     },
     Log {
@@ -296,7 +296,7 @@ pub fn run(
         Command::Info => info::run(&mut client, format),
         Command::Version => version::run(&mut client, format),
         Command::Query { sql } => query::run(&mut client, &sql, format),
-        Command::Checkout { file } => checkout::run(&mut client, file.as_deref()),
+        Command::Export { file } => export::run(&mut client, file.as_deref()),
         Command::Log { author, limit } => log::run(&mut client, author.as_deref(), limit, format),
         Command::Commit { message } => commit::run(&mut client, message.as_deref()),
         Command::PeerAdd {
