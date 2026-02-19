@@ -2,6 +2,7 @@ pub mod agent;
 pub mod bounty;
 pub mod checkout;
 pub mod commit;
+pub mod connect;
 pub mod consensus_cmd;
 pub mod currency;
 pub mod find;
@@ -27,6 +28,9 @@ use crate::db;
 use crate::output::OutputFormat;
 
 pub enum Command {
+    Connect {
+        connection: String,
+    },
     Init {
         path: Option<String>,
     },
@@ -271,6 +275,11 @@ pub fn run(
     db_override: Option<&str>,
     format: &OutputFormat,
 ) -> Result<(), String> {
+    // Connect doesn't need an existing DB connection — handle it early
+    if let Command::Connect { connection } = command {
+        return connect::run(&connection, format);
+    }
+
     let profile = config::load_config(profile_name);
 
     // Determine the connection string for init's config file
