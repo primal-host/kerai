@@ -1,6 +1,8 @@
 use clap::ValueEnum;
 use comfy_table::{presets::UTF8_FULL_CONDENSED, Table};
 
+use crate::case;
+
 #[derive(Debug, Clone, ValueEnum)]
 pub enum OutputFormat {
     Table,
@@ -22,12 +24,17 @@ pub fn print_json(value: &serde_json::Value, format: &OutputFormat) {
 }
 
 /// Print tabular data in the requested format.
+///
+/// Column names from Postgres (snake_case) are automatically translated
+/// to camelCase for display per kerai naming convention.
 pub fn print_rows(columns: &[String], rows: &[Vec<String>], format: &OutputFormat) {
+    let camel_columns: Vec<String> = columns.iter().map(|c| case::to_camel(c)).collect();
+
     match format {
         OutputFormat::Table => {
             let mut table = Table::new();
             table.load_preset(UTF8_FULL_CONDENSED);
-            table.set_header(columns);
+            table.set_header(&camel_columns);
             for row in rows {
                 table.add_row(row);
             }
@@ -38,7 +45,7 @@ pub fn print_rows(columns: &[String], rows: &[Vec<String>], format: &OutputForma
                 .iter()
                 .map(|row| {
                     let mut map = serde_json::Map::new();
-                    for (i, col) in columns.iter().enumerate() {
+                    for (i, col) in camel_columns.iter().enumerate() {
                         map.insert(
                             col.clone(),
                             serde_json::Value::String(row.get(i).cloned().unwrap_or_default()),
@@ -50,7 +57,7 @@ pub fn print_rows(columns: &[String], rows: &[Vec<String>], format: &OutputForma
             println!("{}", serde_json::to_string_pretty(&json_rows).unwrap());
         }
         OutputFormat::Csv => {
-            println!("{}", columns.join(","));
+            println!("{}", camel_columns.join(","));
             for row in rows {
                 println!("{}", row.join(","));
             }
