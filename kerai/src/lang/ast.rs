@@ -40,16 +40,14 @@ pub enum Line {
     /// Comment line (`# ...` or `// ...`).
     Comment { text: String },
 
-    /// Definition: `:name target` — alias or function binding.
-    /// Records the active notation mode as function metadata.
+    /// Definition: `name: target` — alias or function binding.
+    /// Trailing colon on the first token signals a definition.
+    /// Records the active notation mode as metadata.
     Definition {
         name: String,
         target: String,
         notation: Notation,
     },
-
-    /// Type annotation: `name: type` (reserved for future use).
-    TypeAnnotation { name: String, type_expr: String },
 
     /// Function call: `name arg1 arg2` — interpretation depends on notation mode.
     /// Args are `Expr` trees — flat lines produce `Expr::Atom` leaves,
