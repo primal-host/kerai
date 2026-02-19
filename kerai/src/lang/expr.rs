@@ -11,6 +11,10 @@ pub enum Expr {
     /// Notation-agnostic — always stores function name + ordered args
     /// regardless of how it was originally written.
     Apply { function: String, args: Vec<Expr> },
+
+    /// List / quotation: `[a b c]`.
+    /// Contents are not evaluated — everything inside is data/program.
+    List(Vec<Expr>),
 }
 
 /// A token in postfix (RPN) form.
@@ -35,6 +39,14 @@ impl Expr {
                 }
                 out.push(PostfixToken::Operator(function.clone()));
                 out
+            }
+            Expr::List(elements) => {
+                // A list is a single operand on the stack — render as "[a b c]"
+                let inner: Vec<String> = elements.iter().map(|e| match e {
+                    Expr::Atom(s) => s.clone(),
+                    Expr::List(_) | Expr::Apply { .. } => format!("{e:?}"),
+                }).collect();
+                vec![PostfixToken::Operand(format!("[{}]", inner.join(" ")))]
             }
         }
     }
@@ -90,6 +102,16 @@ mod tests {
                 PostfixToken::Operator("+".into()),
             ]
         );
+    }
+
+    #[test]
+    fn list_to_postfix() {
+        let e = Expr::List(vec![
+            Expr::Atom("1".into()),
+            Expr::Atom("2".into()),
+            Expr::Atom("3".into()),
+        ]);
+        assert_eq!(e.to_postfix(), vec![PostfixToken::Operand("[1 2 3]".into())]);
     }
 
     #[test]
