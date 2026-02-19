@@ -41,6 +41,8 @@ tree-sitter-c = "0.23"
 git2 = "0.19"
 regex = "1"
 tempfile = "3"
+tree-sitter-latex = { git = "https://github.com/latex-lsp/tree-sitter-latex.git", branch = "master" }
+biblatex = "0.11"
 
 [dev-dependencies]
 pgrx-tests = "=0.17.0"
