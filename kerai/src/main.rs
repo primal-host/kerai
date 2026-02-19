@@ -8,6 +8,7 @@ mod output;
 
 use std::collections::HashMap;
 use std::env;
+use std::io::{self, BufRead, Write};
 
 use clap::{Parser, Subcommand};
 use output::OutputFormat;
@@ -884,6 +885,91 @@ fn try_eval(args: &[String], aliases: &HashMap<String, String>) -> Option<Result
     }
 }
 
+/// Check whether we should enter the interactive REPL.
+/// Returns true when there are no positional arguments and no --help/-h/--version/-V flags.
+fn should_enter_repl(args: &[String]) -> bool {
+    let mut i = 1; // skip program name
+    while i < args.len() {
+        let arg = &args[i];
+        if matches!(arg.as_str(), "--help" | "-h" | "--version" | "-V") {
+            return false;
+        }
+        if arg.starts_with("--") {
+            if FLAGS_WITH_VALUE.contains(&arg.as_str()) {
+                i += 1; // skip the flag's value
+            }
+            i += 1;
+            continue;
+        }
+        // Found a positional argument — not a bare invocation
+        return false;
+    }
+    true
+}
+
+/// Interactive calculator REPL. Reads lines from stdin and evaluates them.
+fn run_repl() {
+    let stdin = io::stdin();
+    let mut reader = stdin.lock();
+    let mut notation = lang::Notation::Infix;
+
+    loop {
+        print!("kerai> ");
+        if io::stdout().flush().is_err() {
+            break;
+        }
+
+        let mut line = String::new();
+        match reader.read_line(&mut line) {
+            Ok(0) => break, // EOF (Ctrl-D)
+            Err(_) => break,
+            Ok(_) => {}
+        }
+
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if matches!(trimmed, "exit" | "quit") {
+            break;
+        }
+
+        // Check for notation switch
+        let (first, rest) = trimmed
+            .split_once(char::is_whitespace)
+            .unwrap_or((trimmed, ""));
+
+        let source = if let Some(&(_, new_notation)) = NOTATION_SWITCHES
+            .iter()
+            .find(|&&(switch, _)| switch == first)
+        {
+            notation = new_notation;
+            rest.trim()
+        } else {
+            trimmed
+        };
+
+        if source.is_empty() {
+            continue;
+        }
+
+        match lang::parse_expr(source, notation) {
+            Some(expr) => {
+                let value = lang::eval::eval(&expr);
+                match value {
+                    lang::eval::Value::Str(s) => {
+                        eprintln!("error: expression did not evaluate\n{s}");
+                    }
+                    _ => println!("{value}"),
+                }
+            }
+            None => {
+                eprintln!("error: expression did not evaluate\n{source}");
+            }
+        }
+    }
+}
+
 /// Rewrites argv so that dot-namespaced commands become space-separated subcommands.
 ///
 /// `kerai postgres.query "SQL"` → `["kerai", "postgres", "query", "SQL"]`
@@ -971,6 +1057,11 @@ fn main() {
                 std::process::exit(1);
             }
         }
+    }
+
+    if should_enter_repl(&raw_args) {
+        run_repl();
+        return;
     }
 
     let args = rewrite_args(raw_args.into_iter(), &aliases);
@@ -1443,5 +1534,35 @@ mod tests {
     fn eval_dot_subcommand_falls_through() {
         // Dot-prefixed but not a notation switch — should fall through
         assert_eq!(try_eval(&sv("kerai .unknown stuff"), &no_aliases()), None);
+    }
+
+    // --- should_enter_repl tests ---
+
+    #[test]
+    fn repl_bare_invocation() {
+        assert!(should_enter_repl(&sv("kerai")));
+    }
+
+    #[test]
+    fn repl_with_flags_only() {
+        assert!(should_enter_repl(&sv("kerai --db mydb --format json")));
+    }
+
+    #[test]
+    fn repl_help_flag_skips() {
+        assert!(!should_enter_repl(&sv("kerai --help")));
+        assert!(!should_enter_repl(&sv("kerai -h")));
+    }
+
+    #[test]
+    fn repl_version_flag_skips() {
+        assert!(!should_enter_repl(&sv("kerai --version")));
+        assert!(!should_enter_repl(&sv("kerai -V")));
+    }
+
+    #[test]
+    fn repl_positional_arg_skips() {
+        assert!(!should_enter_repl(&sv("kerai 3 + 4")));
+        assert!(!should_enter_repl(&sv("kerai postgres ping")));
     }
 }
