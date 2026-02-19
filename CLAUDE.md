@@ -140,11 +140,12 @@ Where this applies:
 The `.kerai` file format uses these conventions:
 ```
 # comment lines (# or //)
-:name target        — alias/function definition (leading colon)
-name: type          — type annotation (trailing colon, reserved/future)
-name arg            — function call, infix (no colon)
+name: target        — alias/function definition (trailing colon)
+:name expr          — type application (leading colon)
+name arg            — function call (no colon)
+[a b c]             — list/quotation (square brackets, contents not evaluated)
 ```
 
 Files:
-- `~/.kerai/aliases.kerai` — user-editable aliases (`:pg postgres`)
+- `~/.kerai/aliases.kerai` — user-editable aliases (`pg: postgres`)
 - `~/.kerai/kerai.kerai` — machine-controlled config (`postgres.global.connection ...`)
