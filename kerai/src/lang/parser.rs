@@ -5,6 +5,11 @@ use super::expr::Expr;
 use super::pratt;
 use super::token::{tokenize, Token, TokenKind};
 
+/// Returns true if the token value is a known binary operator.
+fn is_known_binary_op(s: &str) -> bool {
+    matches!(s, "+" | "-" | "*" | "/" | "%")
+}
+
 /// Parser with a notation mode stack and alias tracking for `.kerai` files.
 pub struct Parser {
     notation_stack: Vec<Notation>,
@@ -148,177 +153,251 @@ impl Parser {
             }
         }
 
-        // Check if there are any parens in the token stream
-        let has_parens = tokens.iter().any(|t| t.kind == TokenKind::LParen || t.kind == TokenKind::RParen);
-
-        // Function call — dispatch based on notation mode
+        // All lines go through the expression parser for their notation mode
         let notation = self.notation();
+        self.parse_expr_line(&tokens, notation)
+    }
 
-        if has_parens || notation == Notation::Infix {
-            // Use expression-based parsing
-            return self.parse_expr_line(&tokens, notation);
-        }
-
-        // Flat path (no parens, prefix/postfix) — unchanged backward compat
-        let values: Vec<String> = tokens.into_iter().map(|t| t.value).collect();
-
-        if values.len() == 1 {
-            return Line::Call {
-                function: values[0].clone(),
-                args: vec![],
-                notation,
-            };
-        }
-
-        let (function, args) = match notation {
-            Notation::Prefix => {
-                let function = values[0].clone();
-                let args: Vec<Expr> = values[1..].iter().map(|v| Expr::Atom(v.clone())).collect();
-                (function, args)
+    /// Parse a line with expression-aware parsing (handles parens, brackets, and operators).
+    fn parse_expr_line(&mut self, tokens: &[Token], notation: Notation) -> Line {
+        let expr = match notation {
+            Notation::Infix => {
+                match pratt::parse_infix(tokens) {
+                    Some(e) => e,
+                    None => return Line::Empty,
+                }
             }
-            Notation::Postfix => {
-                let function = values.last().unwrap().clone();
-                let args: Vec<Expr> = values[..values.len() - 1]
-                    .iter()
-                    .map(|v| Expr::Atom(v.clone()))
-                    .collect();
-                (function, args)
-            }
-            Notation::Infix => unreachable!("infix handled above"),
+            Notation::Prefix => self.parse_prefix_expr(tokens),
+            Notation::Postfix => self.parse_postfix_expr(tokens),
         };
 
-        Line::Call {
-            function,
-            args,
-            notation,
-        }
-    }
-
-    /// Parse a line with expression-aware parsing (handles parens and infix).
-    fn parse_expr_line(&mut self, tokens: &[Token], notation: Notation) -> Line {
-        match notation {
-            Notation::Infix => self.parse_infix_line(tokens),
-            Notation::Prefix => self.parse_prefix_line_with_parens(tokens),
-            Notation::Postfix => self.parse_postfix_line_with_parens(tokens),
-        }
-    }
-
-    /// Parse an infix line using the Pratt parser.
-    fn parse_infix_line(&mut self, tokens: &[Token]) -> Line {
-        match pratt::parse_infix(tokens) {
-            Some(Expr::Atom(s)) => Line::Call {
+        match expr {
+            Expr::Atom(s) => Line::Call {
                 function: s,
                 args: vec![],
-                notation: Notation::Infix,
+                notation,
             },
-            Some(Expr::Apply { function, args }) => Line::Call {
+            Expr::Apply { function, args } => Line::Call {
                 function,
                 args,
-                notation: Notation::Infix,
+                notation,
             },
-            None => Line::Empty,
+            Expr::List(elements) => Line::Call {
+                function: "list".into(),
+                args: vec![Expr::List(elements)],
+                notation,
+            },
         }
     }
 
-    /// Parse a prefix line that contains parenthesized sub-expressions.
-    fn parse_prefix_line_with_parens(&mut self, tokens: &[Token]) -> Line {
-        // Parse all tokens as expressions (handling paren groups)
-        let exprs = self.parse_arg_list(tokens, Notation::Prefix);
+    /// Stack-based postfix expression parser.
+    ///
+    /// Known binary operators (`+`, `-`, `*`, `/`, `%`) pop two operands from
+    /// the stack. Everything else pushes as an operand. If no known operator
+    /// fires, falls back to flat postfix (last = function, rest = args).
+    fn parse_postfix_expr(&mut self, tokens: &[Token]) -> Expr {
+        let mut stack: Vec<Expr> = Vec::new();
+        let mut any_op_fired = false;
+        let mut i = 0;
 
-        if exprs.is_empty() {
-            return Line::Empty;
+        while i < tokens.len() {
+            match tokens[i].kind {
+                TokenKind::LParen => {
+                    if let Some((inner, end)) = extract_paren_group(tokens, i) {
+                        let expr = self.parse_paren_group(inner, Notation::Postfix);
+                        stack.push(expr);
+                        i = end + 1;
+                    } else {
+                        stack.push(Expr::Atom(tokens[i].value.clone()));
+                        i += 1;
+                    }
+                }
+                TokenKind::LBracket => {
+                    if let Some((inner, end)) = extract_bracket_group(tokens, i) {
+                        let elements = self.parse_list_elements(inner);
+                        stack.push(Expr::List(elements));
+                        i = end + 1;
+                    } else {
+                        stack.push(Expr::Atom(tokens[i].value.clone()));
+                        i += 1;
+                    }
+                }
+                TokenKind::Word => {
+                    if !tokens[i].quoted && is_known_binary_op(&tokens[i].value) && stack.len() >= 2 {
+                        let b = stack.pop().unwrap();
+                        let a = stack.pop().unwrap();
+                        stack.push(Expr::Apply {
+                            function: tokens[i].value.clone(),
+                            args: vec![a, b],
+                        });
+                        any_op_fired = true;
+                    } else {
+                        stack.push(Expr::Atom(tokens[i].value.clone()));
+                    }
+                    i += 1;
+                }
+                TokenKind::RParen | TokenKind::RBracket => {
+                    i += 1; // skip unexpected closing delimiters
+                }
+            }
         }
 
-        // Single expression — unwrap it as the line's call
-        if exprs.len() == 1 {
-            return match exprs.into_iter().next().unwrap() {
-                Expr::Atom(s) => Line::Call {
-                    function: s,
-                    args: vec![],
-                    notation: Notation::Prefix,
-                },
-                Expr::Apply { function, args } => Line::Call {
+        if stack.is_empty() {
+            return Expr::Atom(String::new());
+        }
+        if stack.len() == 1 {
+            return stack.into_iter().next().unwrap();
+        }
+
+        // If no known operator fired, use flat fallback: last = function, rest = args
+        if !any_op_fired {
+            let last = stack.pop().unwrap();
+            match last {
+                Expr::Atom(function) => Expr::Apply {
                     function,
-                    args,
-                    notation: Notation::Prefix,
+                    args: stack,
                 },
-            };
+                Expr::Apply { function, args: inner_args } => {
+                    let mut all_args = stack;
+                    all_args.extend(inner_args);
+                    Expr::Apply { function, args: all_args }
+                }
+                Expr::List(_) => {
+                    // Last item is a list — no clear function, return last on stack
+                    stack.push(last);
+                    let function_expr = stack.pop().unwrap();
+                    function_expr
+                }
+            }
+        } else {
+            // Known ops fired — remaining stack items form the result
+            // If multiple items remain, treat as nested applications
+            if stack.len() == 1 {
+                stack.into_iter().next().unwrap()
+            } else {
+                // Multiple remaining — last is result
+                stack.pop().unwrap()
+            }
+        }
+    }
+
+    /// Recursive prefix expression parser.
+    ///
+    /// Known binary operators consume two arguments recursively.
+    /// Non-operator words are atoms. If no known operator is found in the
+    /// entire expression, falls back to flat prefix (first = function, rest = args).
+    fn parse_prefix_expr(&mut self, tokens: &[Token]) -> Expr {
+        // Check if any word token at depth 0 is a known binary op
+        let mut depth = 0;
+        let mut has_known_op = false;
+        let mut has_groups = false;
+        for t in tokens {
+            match t.kind {
+                TokenKind::LParen | TokenKind::LBracket => {
+                    has_groups = true;
+                    depth += 1;
+                }
+                TokenKind::RParen | TokenKind::RBracket => {
+                    depth -= 1;
+                }
+                TokenKind::Word if depth == 0 && !t.quoted && is_known_binary_op(&t.value) => {
+                    has_known_op = true;
+                }
+                _ => {}
+            }
         }
 
-        // Multiple expressions: first is function, rest are args
+        if has_known_op {
+            // Use recursive descent prefix parsing
+            let mut pos = 0;
+            let result = self.parse_prefix_recursive(tokens, &mut pos);
+            // If there are remaining tokens after the prefix parse, they're extra
+            // args — this shouldn't normally happen with well-formed prefix
+            result
+        } else if has_groups {
+            // Has paren/bracket groups but no known operators — flat prefix with groups
+            let exprs = self.parse_arg_list(tokens, Notation::Prefix);
+            self.flat_prefix_from_exprs(exprs)
+        } else {
+            // Pure flat prefix: first = function, rest = args
+            let exprs: Vec<Expr> = tokens.iter().map(|t| Expr::Atom(t.value.clone())).collect();
+            self.flat_prefix_from_exprs(exprs)
+        }
+    }
+
+    /// Convert a list of expressions into flat prefix form (first = function, rest = args).
+    fn flat_prefix_from_exprs(&self, exprs: Vec<Expr>) -> Expr {
+        if exprs.is_empty() {
+            return Expr::Atom(String::new());
+        }
+        if exprs.len() == 1 {
+            return exprs.into_iter().next().unwrap();
+        }
         let mut iter = exprs.into_iter();
         let first = iter.next().unwrap();
         match first {
-            Expr::Atom(function) => {
-                let args: Vec<Expr> = iter.collect();
-                Line::Call {
-                    function,
-                    args,
-                    notation: Notation::Prefix,
-                }
-            }
-            Expr::Apply { function, mut args } => {
-                // First is already an Apply — extend with remaining
-                args.extend(iter);
-                Line::Call {
-                    function,
-                    args,
-                    notation: Notation::Prefix,
-                }
-            }
-        }
-    }
-
-    /// Parse a postfix line that contains parenthesized sub-expressions.
-    fn parse_postfix_line_with_parens(&mut self, tokens: &[Token]) -> Line {
-        // Collect all expressions from the token stream
-        let exprs = self.parse_arg_list(tokens, Notation::Postfix);
-
-        if exprs.is_empty() {
-            return Line::Empty;
-        }
-
-        if exprs.len() == 1 {
-            // Single expression — check if it's an Apply or Atom
-            return match exprs.into_iter().next().unwrap() {
-                Expr::Atom(s) => Line::Call {
-                    function: s,
-                    args: vec![],
-                    notation: Notation::Postfix,
-                },
-                Expr::Apply { function, args } => Line::Call {
-                    function,
-                    args,
-                    notation: Notation::Postfix,
-                },
-            };
-        }
-
-        // Stack-based postfix: last expr is operator, rest are operands
-        // For flat tokens: last is function, rest are args
-        let mut exprs = exprs;
-        let last = exprs.pop().unwrap();
-        match last {
-            Expr::Atom(function) => Line::Call {
+            Expr::Atom(function) => Expr::Apply {
                 function,
-                args: exprs,
-                notation: Notation::Postfix,
+                args: iter.collect(),
             },
-            Expr::Apply { function, args: inner_args } => {
-                // The last expression is itself an Apply — it becomes the entire call
-                // with the preceding expressions prepended as additional args
-                let mut all_args = exprs;
-                all_args.extend(inner_args);
-                Line::Call {
-                    function,
-                    args: all_args,
-                    notation: Notation::Postfix,
+            Expr::Apply { function, mut args } => {
+                args.extend(iter);
+                Expr::Apply { function, args }
+            }
+            other => other,
+        }
+    }
+
+    /// Recursive prefix parser — known binary ops consume two args.
+    fn parse_prefix_recursive(&mut self, tokens: &[Token], pos: &mut usize) -> Expr {
+        if *pos >= tokens.len() {
+            return Expr::Atom(String::new());
+        }
+
+        match tokens[*pos].kind {
+            TokenKind::LParen => {
+                if let Some((inner, end)) = extract_paren_group(tokens, *pos) {
+                    *pos = end + 1;
+                    self.parse_paren_group(inner, Notation::Prefix)
+                } else {
+                    let val = tokens[*pos].value.clone();
+                    *pos += 1;
+                    Expr::Atom(val)
                 }
+            }
+            TokenKind::LBracket => {
+                if let Some((inner, end)) = extract_bracket_group(tokens, *pos) {
+                    *pos = end + 1;
+                    let elements = self.parse_list_elements(inner);
+                    Expr::List(elements)
+                } else {
+                    let val = tokens[*pos].value.clone();
+                    *pos += 1;
+                    Expr::Atom(val)
+                }
+            }
+            TokenKind::Word => {
+                let val = tokens[*pos].value.clone();
+                *pos += 1;
+                if !tokens[*pos - 1].quoted && is_known_binary_op(&val) {
+                    let a = self.parse_prefix_recursive(tokens, pos);
+                    let b = self.parse_prefix_recursive(tokens, pos);
+                    Expr::Apply {
+                        function: val,
+                        args: vec![a, b],
+                    }
+                } else {
+                    Expr::Atom(val)
+                }
+            }
+            TokenKind::RParen | TokenKind::RBracket => {
+                *pos += 1;
+                Expr::Atom(String::new())
             }
         }
     }
 
-    /// Parse a token slice into a list of `Expr` values, handling paren groups.
+    /// Parse a token slice into a list of `Expr` values, handling paren and bracket groups.
     fn parse_arg_list(&mut self, tokens: &[Token], notation: Notation) -> Vec<Expr> {
         let mut args = Vec::new();
         let mut i = 0;
@@ -326,19 +405,26 @@ impl Parser {
         while i < tokens.len() {
             match tokens[i].kind {
                 TokenKind::LParen => {
-                    // Find matching close paren
                     if let Some((inner, end)) = extract_paren_group(tokens, i) {
                         let expr = self.parse_paren_group(inner, notation);
                         args.push(expr);
                         i = end + 1;
                     } else {
-                        // Unmatched paren — treat as atom
                         args.push(Expr::Atom(tokens[i].value.clone()));
                         i += 1;
                     }
                 }
-                TokenKind::RParen => {
-                    // Unexpected close paren — skip
+                TokenKind::LBracket => {
+                    if let Some((inner, end)) = extract_bracket_group(tokens, i) {
+                        let elements = self.parse_list_elements(inner);
+                        args.push(Expr::List(elements));
+                        i = end + 1;
+                    } else {
+                        args.push(Expr::Atom(tokens[i].value.clone()));
+                        i += 1;
+                    }
+                }
+                TokenKind::RParen | TokenKind::RBracket => {
                     i += 1;
                 }
                 TokenKind::Word => {
@@ -349,6 +435,47 @@ impl Parser {
         }
 
         args
+    }
+
+    /// Parse the contents of a bracket group as list elements (no operator evaluation).
+    fn parse_list_elements(&mut self, tokens: &[Token]) -> Vec<Expr> {
+        let mut elements = Vec::new();
+        let mut i = 0;
+
+        while i < tokens.len() {
+            match tokens[i].kind {
+                TokenKind::LBracket => {
+                    if let Some((inner, end)) = extract_bracket_group(tokens, i) {
+                        let nested = self.parse_list_elements(inner);
+                        elements.push(Expr::List(nested));
+                        i = end + 1;
+                    } else {
+                        elements.push(Expr::Atom(tokens[i].value.clone()));
+                        i += 1;
+                    }
+                }
+                TokenKind::LParen => {
+                    if let Some((inner, end)) = extract_paren_group(tokens, i) {
+                        // Inside a list, paren groups are still parsed as expressions
+                        let expr = self.parse_paren_group(inner, Notation::Prefix);
+                        elements.push(expr);
+                        i = end + 1;
+                    } else {
+                        elements.push(Expr::Atom(tokens[i].value.clone()));
+                        i += 1;
+                    }
+                }
+                TokenKind::RParen | TokenKind::RBracket => {
+                    i += 1;
+                }
+                TokenKind::Word => {
+                    elements.push(Expr::Atom(tokens[i].value.clone()));
+                    i += 1;
+                }
+            }
+        }
+
+        elements
     }
 
     /// Parse the contents of a parenthesized group.
@@ -382,64 +509,8 @@ impl Parser {
 
         match notation {
             Notation::Infix => pratt::parse_infix(tokens).unwrap_or(Expr::Atom(String::new())),
-            Notation::Prefix => {
-                let args = self.parse_arg_list(tokens, notation);
-                if args.is_empty() {
-                    Expr::Atom(String::new())
-                } else if args.len() == 1 {
-                    args.into_iter().next().unwrap()
-                } else {
-                    // First is function, rest are args
-                    let mut iter = args.into_iter();
-                    let first = iter.next().unwrap();
-                    let function = match first {
-                        Expr::Atom(s) => s,
-                        _ => return first, // single nested expr
-                    };
-                    let rest: Vec<Expr> = iter.collect();
-                    Expr::Apply {
-                        function,
-                        args: rest,
-                    }
-                }
-            }
-            Notation::Postfix => {
-                let args = self.parse_arg_list(tokens, notation);
-                if args.is_empty() {
-                    Expr::Atom(String::new())
-                } else if args.len() == 1 {
-                    args.into_iter().next().unwrap()
-                } else {
-                    // Stack-based: last is operator, rest are operands
-                    let mut args = args;
-                    let last = args.pop().unwrap();
-                    match last {
-                        Expr::Atom(function) => Expr::Apply {
-                            function,
-                            args,
-                        },
-                        apply => {
-                            // Last is already an Apply — return it
-                            // (preceding operands become additional context)
-                            args.push(apply);
-                            if args.len() == 1 {
-                                args.into_iter().next().unwrap()
-                            } else {
-                                // Multiple items with no clear operator — wrap last
-                                let last = args.pop().unwrap();
-                                match last {
-                                    Expr::Apply { function, args: inner } => {
-                                        let mut all = args;
-                                        all.extend(inner);
-                                        Expr::Apply { function, args: all }
-                                    }
-                                    other => other,
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            Notation::Prefix => self.parse_prefix_expr(tokens),
+            Notation::Postfix => self.parse_postfix_expr(tokens),
         }
     }
 }
@@ -455,6 +526,29 @@ fn extract_paren_group(tokens: &[Token], start: usize) -> Option<(&[Token], usiz
         match tok.kind {
             TokenKind::LParen => depth += 1,
             TokenKind::RParen => {
+                depth -= 1;
+                if depth == 0 {
+                    let end = start + i;
+                    return Some((&tokens[start + 1..end], end));
+                }
+            }
+            _ => {}
+        }
+    }
+    None // unmatched
+}
+
+/// Extract the inner tokens of a balanced bracket group starting at `start`.
+/// Returns `(inner_tokens_slice, closing_bracket_index)`.
+fn extract_bracket_group(tokens: &[Token], start: usize) -> Option<(&[Token], usize)> {
+    if tokens.get(start)?.kind != TokenKind::LBracket {
+        return None;
+    }
+    let mut depth = 0;
+    for (i, tok) in tokens[start..].iter().enumerate() {
+        match tok.kind {
+            TokenKind::LBracket => depth += 1,
+            TokenKind::RBracket => {
                 depth -= 1;
                 if depth == 0 {
                     let end = start + i;
@@ -883,6 +977,228 @@ mod tests {
         let tokens = tokenize("(a (b c) d)");
         let (inner, end) = extract_paren_group(&tokens, 0).unwrap();
         assert_eq!(inner.len(), 6); // a ( b c ) d
+        assert_eq!(end, 7);
+    }
+
+    // --- Postfix stack-based tests ---
+
+    #[test]
+    fn postfix_stack_binary_op() {
+        // 1 2 + → +(1, 2)
+        let mut parser = Parser::new();
+        let doc = parser.parse("kerai.postfix\n1 2 +\n");
+        match &doc.lines[1] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "+");
+                assert_eq!(args, &[Expr::Atom("1".into()), Expr::Atom("2".into())]);
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn postfix_stack_chained_ops() {
+        // 1 2 3 * + → +(1, *(2, 3))
+        let mut parser = Parser::new();
+        let doc = parser.parse("kerai.postfix\n1 2 3 * +\n");
+        match &doc.lines[1] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "+");
+                assert_eq!(args.len(), 2);
+                assert_eq!(args[0], Expr::Atom("1".into()));
+                assert_eq!(
+                    args[1],
+                    Expr::Apply {
+                        function: "*".into(),
+                        args: vec![Expr::Atom("2".into()), Expr::Atom("3".into())],
+                    }
+                );
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn postfix_with_list() {
+        // 1 [2 3 4 5] + → +(1, List([2, 3, 4, 5]))
+        let mut parser = Parser::new();
+        let doc = parser.parse("kerai.postfix\n1 [2 3 4 5] +\n");
+        match &doc.lines[1] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "+");
+                assert_eq!(args.len(), 2);
+                assert_eq!(args[0], Expr::Atom("1".into()));
+                assert_eq!(
+                    args[1],
+                    Expr::List(vec![
+                        Expr::Atom("2".into()),
+                        Expr::Atom("3".into()),
+                        Expr::Atom("4".into()),
+                        Expr::Atom("5".into()),
+                    ])
+                );
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn postfix_flat_fallback() {
+        // a b c (no known ops) → c(a, b) — flat fallback
+        let mut parser = Parser::new();
+        let doc = parser.parse("kerai.postfix\na b c\n");
+        match &doc.lines[1] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "c");
+                assert_eq!(args, &[Expr::Atom("a".into()), Expr::Atom("b".into())]);
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    // --- Prefix recursive tests ---
+
+    #[test]
+    fn prefix_binary_op() {
+        // + 1 2 → +(1, 2)
+        let mut parser = Parser::new();
+        let doc = parser.parse("+ 1 2\n");
+        match &doc.lines[0] {
+            Line::Call { function, args, notation, .. } => {
+                assert_eq!(function, "+");
+                assert_eq!(*notation, Notation::Prefix);
+                assert_eq!(args, &[Expr::Atom("1".into()), Expr::Atom("2".into())]);
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefix_nested_ops() {
+        // + 1 * 2 3 → +(1, *(2, 3))
+        let mut parser = Parser::new();
+        let doc = parser.parse("+ 1 * 2 3\n");
+        match &doc.lines[0] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "+");
+                assert_eq!(args.len(), 2);
+                assert_eq!(args[0], Expr::Atom("1".into()));
+                assert_eq!(
+                    args[1],
+                    Expr::Apply {
+                        function: "*".into(),
+                        args: vec![Expr::Atom("2".into()), Expr::Atom("3".into())],
+                    }
+                );
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefix_with_list() {
+        // + 1 [2 3 4 5] → +(1, List([2, 3, 4, 5]))
+        let mut parser = Parser::new();
+        let doc = parser.parse("+ 1 [2 3 4 5]\n");
+        match &doc.lines[0] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "+");
+                assert_eq!(args.len(), 2);
+                assert_eq!(args[0], Expr::Atom("1".into()));
+                assert_eq!(
+                    args[1],
+                    Expr::List(vec![
+                        Expr::Atom("2".into()),
+                        Expr::Atom("3".into()),
+                        Expr::Atom("4".into()),
+                        Expr::Atom("5".into()),
+                    ])
+                );
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn prefix_flat_fallback() {
+        // foo bar baz (no known ops) → foo(bar, baz) — flat fallback
+        let mut parser = Parser::new();
+        let doc = parser.parse("foo bar baz\n");
+        match &doc.lines[0] {
+            Line::Call { function, args, notation, .. } => {
+                assert_eq!(function, "foo");
+                assert_eq!(*notation, Notation::Prefix);
+                assert_eq!(args, &[Expr::Atom("bar".into()), Expr::Atom("baz".into())]);
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    // --- Bracket/list tests in parser ---
+
+    #[test]
+    fn bracket_as_quotation_no_eval() {
+        // [1 2 +] → no evaluation inside brackets
+        let mut parser = Parser::new();
+        let doc = parser.parse("kerai.postfix\n[1 2 +]\n");
+        // The whole line is a list — becomes list(List(...))
+        match &doc.lines[1] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "list");
+                assert_eq!(args.len(), 1);
+                assert_eq!(
+                    args[0],
+                    Expr::List(vec![
+                        Expr::Atom("1".into()),
+                        Expr::Atom("2".into()),
+                        Expr::Atom("+".into()),
+                    ])
+                );
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn nested_bracket_list_parser() {
+        // [1 [2 3] 4] → List([1, List([2, 3]), 4])
+        let mut parser = Parser::new();
+        let doc = parser.parse("[1 [2 3] 4]\n");
+        match &doc.lines[0] {
+            Line::Call { function, args, .. } => {
+                assert_eq!(function, "list");
+                assert_eq!(
+                    args[0],
+                    Expr::List(vec![
+                        Expr::Atom("1".into()),
+                        Expr::List(vec![
+                            Expr::Atom("2".into()),
+                            Expr::Atom("3".into()),
+                        ]),
+                        Expr::Atom("4".into()),
+                    ])
+                );
+            }
+            other => panic!("expected Call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_bracket_group_basic() {
+        let tokens = tokenize("[a b c]");
+        let (inner, end) = extract_bracket_group(&tokens, 0).unwrap();
+        assert_eq!(inner.len(), 3);
+        assert_eq!(inner[0].value, "a");
+        assert_eq!(inner[1].value, "b");
+        assert_eq!(inner[2].value, "c");
+        assert_eq!(end, 4);
+    }
+
+    #[test]
+    fn extract_nested_bracket_group() {
+        let tokens = tokenize("[a [b c] d]");
+        let (inner, end) = extract_bracket_group(&tokens, 0).unwrap();
+        assert_eq!(inner.len(), 6); // a [ b c ] d
         assert_eq!(end, 7);
     }
 }
