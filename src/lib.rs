@@ -3034,7 +3034,7 @@ impl Config {
         .unwrap();
         let obj = result.0.as_object().unwrap();
         assert_eq!(obj["work_type"].as_str().unwrap(), "parse_file");
-        assert_eq!(obj["reward"].as_i64().unwrap(), 10);
+        assert_eq!(obj["reward"].as_i64().unwrap(), 10_000_000_000); // 10 Koi in nKoi
         assert!(obj.contains_key("ledger_id"));
         assert!(obj.contains_key("wallet_id"));
 
@@ -3081,7 +3081,7 @@ impl Config {
 
         // Verify parse_file entry
         let parse_file = arr.iter().find(|v| v["work_type"].as_str() == Some("parse_file")).unwrap();
-        assert_eq!(parse_file["reward"].as_i64().unwrap(), 10);
+        assert_eq!(parse_file["reward"].as_i64().unwrap(), 10_000_000_000); // 10 Koi in nKoi
         assert!(parse_file["enabled"].as_bool().unwrap());
     }
 
