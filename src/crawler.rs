@@ -354,6 +354,219 @@ fn get_existing_reference_keys(instance_id: &str) -> HashMap<String, String> {
     existing
 }
 
+/// Score a single reference by expected free energy.
+///
+/// Components (weights sum to 1.0):
+/// - Citation frequency: `ln(1 + cite_count)`, 40% weight
+/// - Source diversity: `ln(1 + unique_doc_count)`, 30% weight
+/// - Author novelty: 1.0 if new author, 0.1 if already resolved, 20% weight
+/// - Resolvability: type-based likelihood of successful fetch, 10% weight
+///
+/// Higher scores = higher priority for the crawler to chase.
+#[pg_extern]
+fn score_reference(ref_id: &str) -> f64 {
+    let query = format!(
+        "SELECT \
+            (SELECT count(*) FROM kerai.edges \
+             WHERE target_id = r.id AND relation = 'cites') as cite_count, \
+            (SELECT count(DISTINCT doc.id) \
+             FROM kerai.edges e \
+             JOIN kerai.nodes p ON e.source_id = p.id \
+             JOIN kerai.nodes h ON h.id = p.parent_id \
+             JOIN kerai.nodes doc ON doc.id = h.parent_id AND doc.kind = 'document' \
+             WHERE e.target_id = r.id AND e.relation = 'cites') as doc_count, \
+            r.metadata->>'ref_type' as ref_type, \
+            r.metadata->'details'->>'authors' as authors \
+         FROM kerai.nodes r WHERE r.id = {}",
+        sql_uuid(ref_id)
+    );
+
+    let mut cite_count = 0i64;
+    let mut doc_count = 0i64;
+    let mut ref_type = String::new();
+    let mut authors = String::new();
+
+    Spi::connect(|client| {
+        let result = client.select(&query, None, &[]).unwrap();
+        if let Some(row) = result.into_iter().next() {
+            cite_count = row.get_by_name("cite_count").unwrap().unwrap_or(0);
+            doc_count = row.get_by_name("doc_count").unwrap().unwrap_or(0);
+            ref_type = row.get_by_name("ref_type").unwrap().unwrap_or_default();
+            authors = row.get_by_name("authors").unwrap().unwrap_or_default();
+        }
+    });
+
+    let novelty = author_novelty(&authors);
+    efe_score(cite_count, doc_count, &ref_type, novelty)
+}
+
+/// Score all unresolved references and return a ranked JSON list.
+///
+/// Efficient batch version — gathers all data in two queries (reference stats +
+/// resolved authors) and computes scores in Rust without per-row SPI overhead.
+///
+/// Returns: `{ total, references: [{ ref_id, content, ref_type, key, cite_count, doc_count, novelty, score }] }`
+#[pg_extern]
+fn score_references() -> pgrx::JsonB {
+    let query = "\
+        SELECT r.id::text as ref_id, r.content, \
+            r.metadata->>'ref_type' as ref_type, \
+            r.metadata->'details'->>'authors' as authors, \
+            r.metadata->>'key' as ref_key, \
+            (SELECT count(*) FROM kerai.edges \
+             WHERE target_id = r.id AND relation = 'cites') as cite_count, \
+            (SELECT count(DISTINCT doc.id) \
+             FROM kerai.edges e \
+             JOIN kerai.nodes p ON e.source_id = p.id \
+             JOIN kerai.nodes h ON h.id = p.parent_id \
+             JOIN kerai.nodes doc ON doc.id = h.parent_id AND doc.kind = 'document' \
+             WHERE e.target_id = r.id AND e.relation = 'cites') as doc_count \
+        FROM kerai.nodes r \
+        WHERE r.kind = 'reference' AND r.metadata->>'status' = 'unresolved' \
+        ORDER BY r.created_at";
+
+    // Pre-fetch resolved authors for batch novelty calculation
+    let known_authors = get_resolved_authors();
+
+    let mut scored: Vec<serde_json::Value> = Vec::new();
+
+    Spi::connect(|client| {
+        let result = client.select(query, None, &[]).unwrap();
+        for row in result {
+            let ref_id: String = row.get_by_name("ref_id").unwrap().unwrap_or_default();
+            let content: String = row.get_by_name("content").unwrap().unwrap_or_default();
+            let ref_type: String = row.get_by_name("ref_type").unwrap().unwrap_or_default();
+            let authors: String = row.get_by_name("authors").unwrap().unwrap_or_default();
+            let ref_key: String = row.get_by_name("ref_key").unwrap().unwrap_or_default();
+            let cite_count: i64 = row.get_by_name("cite_count").unwrap().unwrap_or(0);
+            let doc_count: i64 = row.get_by_name("doc_count").unwrap().unwrap_or(0);
+
+            let novelty = author_novelty_cached(&authors, &known_authors);
+            let score = efe_score(cite_count, doc_count, &ref_type, novelty);
+
+            scored.push(json!({
+                "ref_id": ref_id,
+                "content": content,
+                "ref_type": ref_type,
+                "key": ref_key,
+                "cite_count": cite_count,
+                "doc_count": doc_count,
+                "novelty": novelty,
+                "score": (score * 1000.0).round() / 1000.0,
+            }));
+        }
+    });
+
+    // Sort by score descending
+    scored.sort_by(|a, b| {
+        let sa = a["score"].as_f64().unwrap_or(0.0);
+        let sb = b["score"].as_f64().unwrap_or(0.0);
+        sb.partial_cmp(&sa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    pgrx::JsonB(json!({
+        "total": scored.len(),
+        "references": scored,
+    }))
+}
+
+/// Compute expected free energy score from components.
+fn efe_score(cite_count: i64, doc_count: i64, ref_type: &str, novelty: f64) -> f64 {
+    // Epistemic: citation frequency (log-scaled)
+    let w_citations = (1.0 + cite_count as f64).ln() * 0.4;
+
+    // Epistemic: source diversity (log-scaled unique document count)
+    let w_diversity = (1.0 + doc_count as f64).ln() * 0.3;
+
+    // Epistemic: author novelty
+    let w_novelty = novelty * 0.2;
+
+    // Pragmatic: resolvability by reference type
+    let resolvability = match ref_type {
+        "doi" => 1.0,
+        "arxiv" => 0.9,
+        "url" => 0.8,
+        "bibliography" => 0.6,
+        "citation" => 0.4,
+        _ => 0.2,
+    };
+    let w_resolvability = resolvability * 0.1;
+
+    w_citations + w_diversity + w_novelty + w_resolvability
+}
+
+/// Compute author novelty via SPI (for single-reference scoring).
+fn author_novelty(authors: &str) -> f64 {
+    let key = first_author_key(authors);
+    if key.is_empty() {
+        return 0.5; // unknown — neutral score
+    }
+
+    let count = Spi::get_one::<i64>(&format!(
+        "SELECT count(*) FROM kerai.nodes \
+         WHERE kind = 'reference' AND metadata->>'status' = 'resolved' \
+         AND lower(metadata->'details'->>'authors') LIKE {}",
+        sql_text(&format!("%{}%", key))
+    ))
+    .unwrap_or(Some(0))
+    .unwrap_or(0);
+
+    if count == 0 { 1.0 } else { 0.1 }
+}
+
+/// Compute author novelty using pre-fetched resolved author set (for batch scoring).
+fn author_novelty_cached(authors: &str, known_authors: &[String]) -> f64 {
+    let key = first_author_key(authors);
+    if key.is_empty() {
+        return 0.5;
+    }
+    if known_authors.iter().any(|a| a.contains(&key)) {
+        0.1
+    } else {
+        1.0
+    }
+}
+
+/// Get all resolved reference author strings for batch novelty check.
+fn get_resolved_authors() -> Vec<String> {
+    let mut authors = Vec::new();
+    Spi::connect(|client| {
+        let result = client
+            .select(
+                "SELECT lower(metadata->'details'->>'authors') as authors \
+                 FROM kerai.nodes \
+                 WHERE kind = 'reference' AND metadata->>'status' = 'resolved' \
+                 AND metadata->'details'->>'authors' IS NOT NULL",
+                None,
+                &[],
+            )
+            .unwrap();
+        for row in result {
+            let a: Option<String> = row.get_by_name("authors").unwrap();
+            if let Some(a) = a {
+                authors.push(a);
+            }
+        }
+    });
+    authors
+}
+
+/// Extract normalized first-author key for novelty comparison.
+fn first_author_key(authors: &str) -> String {
+    authors
+        .split(',')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .to_lowercase()
+        .replace('\u{00AD}', "")
+        .replace('\u{00A0}', "")
+        .replace('-', "")
+}
+
 /// Insert citation edges from paragraphs to a reference node.
 /// Returns the number of new edges created.
 fn insert_citation_edges(ref_id: &str, para_ids: &[String]) -> u64 {
