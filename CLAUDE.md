@@ -8,18 +8,39 @@ pgrx Postgres extension (Rust) for AST-based version control with CRDT sync and 
 - **Postgres**: 17.x (Homebrew standalone, NOT Docker)
 - **Rust**: stable (1.93+)
 
+## Workspace Structure
+```
+kerai/                    # workspace root (pure manifest)
+├── Cargo.toml            # [workspace] only — no [package]
+├── postgres/             # pgrx extension crate (name = "kerai")
+├── kerai/                # orchestrator CLI (name = "kerai-cli", bin = "kerai")
+└── web/                  # web interface (name = "kerai-web")
+```
+
 ## Build & Test
 
 ```bash
-# Run all tests (required flags for macOS + PG17)
-LC_ALL=C CARGO_TARGET_DIR="$(pwd)/tgt" cargo pgrx test pg17
+# Run pgrx extension tests (required flags for macOS + PG17)
+cd postgres && LC_ALL=C CARGO_TARGET_DIR="$(pwd)/../tgt" cargo pgrx test pg17
 
-# Interactive REPL
-cargo pgrx run pg17
+# Check/clippy the pgrx extension
+LC_ALL=C CARGO_TARGET_DIR="$(pwd)/tgt" cargo check -p kerai
+LC_ALL=C CARGO_TARGET_DIR="$(pwd)/tgt" cargo clippy -p kerai
+
+# Build CLI or web
+cargo build -p kerai-cli
+cargo build -p kerai-web
+
+# Check the whole workspace
+cargo check
+
+# Interactive REPL (from postgres/)
+cd postgres && cargo pgrx run pg17
 ```
 
 - `LC_ALL=C` — fixes PG17 "postmaster became multithreaded during startup" on macOS
 - Absolute `CARGO_TARGET_DIR` — fixes pgrx-tests relative path bug with initdb
+- `cargo pgrx test` and `cargo pgrx run` must be run from the `postgres/` directory
 - `#[should_panic]` needed for constraint violation tests (PG errors propagate as panics)
 
 ### tree-sitter-latex build prerequisite
@@ -40,16 +61,16 @@ This only needs to be done once per checkout (or after `cargo clean` clears the 
 ## Architecture
 
 ### Schema
-- Extension schema: `kerai` (set in `.control` file's `schema = kerai`)
+- Extension schema: `kerai` (set in `postgres/kerai.control`'s `schema = kerai`)
 - **DO NOT** use `schema = "kerai"` on `#[pg_extern]` — causes "schema did not exist" error
 - Schema is auto-created by Postgres from the `.control` file
 - **DO NOT** include `CREATE SCHEMA` in `extension_sql!` — conflicts with `.control` auto-create
 - `.control` requires `superuser = true` and `trusted = false` (pgrx 0.17 mandates these)
 - `requires = 'ltree'` in `.control` — ltree must be created before kerai
 
-### Module Layout
+### Module Layout (postgres/)
 ```
-src/
+postgres/src/
 ├── lib.rs              # Root: module declarations, pg_module_magic, tests
 ├── schema.rs           # All DDL (extension_sql! with tables, indexes, triggers)
 ├── bootstrap.rs        # Bootstrap/identity initialization
@@ -88,5 +109,5 @@ src/
 
 ## Conventions
 - All `#[pg_extern]` functions go in their respective module (parser, functions, etc.)
-- SQL DDL lives exclusively in `src/schema.rs` via `extension_sql!`
+- SQL DDL lives exclusively in `postgres/src/schema.rs` via `extension_sql!`
 - Tests use `#[pg_test]` and live in `src/lib.rs`
