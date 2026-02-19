@@ -101,7 +101,11 @@ fn entry_metadata(entry: &biblatex::Entry) -> Value {
     if let Ok(date) = entry.date() {
         match date {
             biblatex::PermissiveType::Typed(d) => {
-                meta.insert("year".into(), json!(d.year));
+                let year = match &d.value {
+                        biblatex::DateValue::At(dt) | biblatex::DateValue::After(dt) | biblatex::DateValue::Before(dt) => dt.year,
+                        biblatex::DateValue::Between(dt, _) => dt.year,
+                    };
+                    meta.insert("year".into(), json!(year));
             }
             biblatex::PermissiveType::Chunks(chunks) => {
                 meta.insert("year_raw".into(), json!(owned_chunks_to_string(&chunks)));
@@ -153,10 +157,12 @@ fn entry_metadata(entry: &biblatex::Entry) -> Value {
     }
 
     // Editors
-    if let Ok(editors) = entry.editor() {
+    if let Ok(editors) = entry.editors() {
         let editor_names: Vec<String> = editors
-            .iter()
-            .map(|p| format_person(p))
+            .into_iter()
+            .flat_map(|(persons, _editor_type)| {
+                persons.into_iter().map(|p| format_person(&p))
+            })
             .collect();
         if !editor_names.is_empty() {
             meta.insert("editors".into(), json!(editor_names));
@@ -182,7 +188,11 @@ fn extract_fields(entry: &biblatex::Entry) -> Vec<(String, String)> {
     if let Ok(date) = entry.date() {
         match date {
             biblatex::PermissiveType::Typed(d) => {
-                fields.push(("year".into(), d.year.to_string()));
+                let year = match &d.value {
+                        biblatex::DateValue::At(dt) | biblatex::DateValue::After(dt) | biblatex::DateValue::Before(dt) => dt.year,
+                        biblatex::DateValue::Between(dt, _) => dt.year,
+                    };
+                    fields.push(("year".into(), year.to_string()));
             }
             biblatex::PermissiveType::Chunks(chunks) => {
                 fields.push(("year".into(), owned_chunks_to_string(&chunks)));

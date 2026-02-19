@@ -14,7 +14,7 @@ impl TsLanguage {
         match self {
             TsLanguage::Go => tree_sitter_go::LANGUAGE.into(),
             TsLanguage::C => tree_sitter_c::LANGUAGE.into(),
-            TsLanguage::Latex => tree_sitter_latex::LANGUAGE.into(),
+            TsLanguage::Latex => tree_sitter_latex::language().into(),
         }
     }
 
