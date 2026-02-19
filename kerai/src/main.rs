@@ -824,7 +824,9 @@ fn try_eval(args: &[String], aliases: &HashMap<String, String>) -> Option<String
     let mut i = 1; // skip program name
     while i < args.len() {
         let arg = &args[i];
-        if arg.starts_with('-') {
+        // Only skip long flags (--db, --profile, --format). A bare `-` or `-5`
+        // are valid expression tokens (operator, negative number), not flags.
+        if arg.starts_with("--") {
             if FLAGS_WITH_VALUE.contains(&arg.as_str()) {
                 i += 1; // skip the flag's value too
             }
