@@ -795,6 +795,76 @@ enum CurrencyAction {
 /// Known global flags that take a value argument.
 const FLAGS_WITH_VALUE: &[&str] = &["--db", "--profile", "--format"];
 
+/// Known subcommand names — if the first positional matches one, skip eval mode.
+const SUBCOMMANDS: &[&str] = &[
+    "postgres", "sync", "perspective", "consensus", "peer",
+    "agent", "task", "swarm", "market", "wallet", "bounty",
+    "currency", "model",
+];
+
+/// Notation switch tokens mapped to notation modes.
+const NOTATION_SWITCHES: &[(&str, lang::Notation)] = &[
+    (".pre", lang::Notation::Prefix),
+    (".prefix", lang::Notation::Prefix),
+    (".b", lang::Notation::Prefix),
+    (".in", lang::Notation::Infix),
+    (".infix", lang::Notation::Infix),
+    (".c", lang::Notation::Infix),
+    (".post", lang::Notation::Postfix),
+    (".postfix", lang::Notation::Postfix),
+    (".a", lang::Notation::Postfix),
+];
+
+/// Try to evaluate args as a calculator expression.
+/// Returns `Some(result_string)` if evaluation happened, `None` to fall through to clap.
+fn try_eval(args: &[String]) -> Option<String> {
+    // Extract positional args (skip program name, skip flags and their values)
+    let mut positionals = Vec::new();
+    let mut i = 1; // skip program name
+    while i < args.len() {
+        let arg = &args[i];
+        if arg.starts_with('-') {
+            if FLAGS_WITH_VALUE.contains(&arg.as_str()) {
+                i += 1; // skip the flag's value too
+            }
+            i += 1;
+            continue;
+        }
+        positionals.push(arg.as_str());
+        i += 1;
+    }
+
+    if positionals.is_empty() {
+        return None;
+    }
+
+    // Check first positional for notation switch
+    let (notation, expr_start) = if let Some(&(_, notation)) = NOTATION_SWITCHES
+        .iter()
+        .find(|&&(switch, _)| switch == positionals[0])
+    {
+        (notation, 1)
+    } else if positionals[0].starts_with('.') {
+        // Dot-prefixed but not a notation switch — probably a dot-notation subcommand
+        return None;
+    } else {
+        // Check if first positional is a known subcommand (or alias-expanded subcommand)
+        if SUBCOMMANDS.contains(&positionals[0]) {
+            return None;
+        }
+        (lang::Notation::Infix, 0)
+    };
+
+    let source: String = positionals[expr_start..].join(" ");
+    if source.is_empty() {
+        return None;
+    }
+
+    let expr = lang::parse_expr(&source, notation)?;
+    let value = lang::eval::eval(&expr);
+    Some(value.to_string())
+}
+
 /// Rewrites argv so that dot-namespaced commands become space-separated subcommands.
 ///
 /// `kerai postgres.query "SQL"` → `["kerai", "postgres", "query", "SQL"]`
@@ -869,6 +939,13 @@ fn main() {
     };
 
     let args = rewrite_args(env::args(), &aliases);
+
+    // Try calculator/eval mode before clap subcommand dispatch
+    if let Some(result) = try_eval(&args) {
+        println!("{result}");
+        return;
+    }
+
     let cli = Cli::parse_from(args);
 
     let command = match cli.command {
@@ -1238,5 +1315,83 @@ mod tests {
         let aliases = HashMap::new();
         let result = rewrite_args(args("kerai peer list"), &aliases);
         assert_eq!(result, vec!["kerai", "peer", "list"]);
+    }
+
+    // --- try_eval tests ---
+
+    fn sv(s: &str) -> Vec<String> {
+        s.split_whitespace().map(String::from).collect()
+    }
+
+    #[test]
+    fn eval_simple_addition() {
+        assert_eq!(try_eval(&sv("kerai 3 + 4")), Some("7".into()));
+    }
+
+    #[test]
+    fn eval_precedence() {
+        assert_eq!(try_eval(&sv("kerai 2 + 3 * 4")), Some("14".into()));
+    }
+
+    #[test]
+    fn eval_postfix_switch() {
+        assert_eq!(try_eval(&sv("kerai .post 3 4 +")), Some("7".into()));
+    }
+
+    #[test]
+    fn eval_postfix_chained() {
+        assert_eq!(try_eval(&sv("kerai .a 1 2 3 * +")), Some("7".into()));
+    }
+
+    #[test]
+    fn eval_prefix_switch() {
+        assert_eq!(try_eval(&sv("kerai .pre + 3 4")), Some("7".into()));
+    }
+
+    #[test]
+    fn eval_prefix_nested() {
+        assert_eq!(try_eval(&sv("kerai .b + 1 * 2 3")), Some("7".into()));
+    }
+
+    #[test]
+    fn eval_hex_literal() {
+        assert_eq!(try_eval(&sv("kerai 0xFF")), Some("255".into()));
+    }
+
+    #[test]
+    fn eval_integer_division() {
+        assert_eq!(try_eval(&sv("kerai 10 / 3")), Some("3".into()));
+    }
+
+    #[test]
+    fn eval_float_division() {
+        let result = try_eval(&sv("kerai 10.0 / 3")).unwrap();
+        assert!(result.starts_with("3.333333333333333"));
+    }
+
+    #[test]
+    fn eval_string_passthrough() {
+        assert_eq!(try_eval(&sv("kerai hello")), Some("hello".into()));
+    }
+
+    #[test]
+    fn eval_subcommand_falls_through() {
+        assert_eq!(try_eval(&sv("kerai postgres ping")), None);
+    }
+
+    #[test]
+    fn eval_no_positionals_falls_through() {
+        assert_eq!(try_eval(&sv("kerai --db mydb")), None);
+    }
+
+    #[test]
+    fn eval_skips_flags() {
+        assert_eq!(try_eval(&sv("kerai --db mydb 3 + 4")), Some("7".into()));
+    }
+
+    #[test]
+    fn eval_dot_subcommand_falls_through() {
+        // Dot-prefixed but not a notation switch — should fall through
+        assert_eq!(try_eval(&sv("kerai .unknown stuff")), None);
     }
 }
