@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::lang;
+
 const DEFAULT_ALIASES: &str = "\
 # common aliases for kerai libraries
 :pg postgres
@@ -29,37 +31,16 @@ pub fn ensure_aliases_file(home: &Path) -> Result<PathBuf, String> {
 }
 
 /// Parses `aliases.kerai` into a map of alias → target namespace.
-///
-/// Format:
-/// - Skip empty lines
-/// - Skip lines where trimmed content starts with `#` or `//`
-/// - Lines starting with `:` (after trim): split into alias name + target
 pub fn load_aliases(home: &Path) -> Result<HashMap<String, String>, String> {
     let path = home.join("aliases.kerai");
     if !path.exists() {
         return Ok(HashMap::new());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read aliases.kerai: {e}"))?;
-
-    let mut aliases = HashMap::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
-            continue;
-        }
-        if let Some(rest) = trimmed.strip_prefix(':') {
-            let mut parts = rest.splitn(2, char::is_whitespace);
-            if let (Some(alias), Some(target)) = (parts.next(), parts.next()) {
-                let alias = alias.trim();
-                let target = target.trim();
-                if !alias.is_empty() && !target.is_empty() {
-                    aliases.insert(alias.to_string(), target.to_string());
-                }
-            }
-        }
-    }
-    Ok(aliases)
+    let doc = lang::parse_file(&path)?;
+    Ok(lang::definitions(&doc)
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect())
 }
 
 const KERAI_FILE_HEADER: &str = "\
@@ -78,40 +59,16 @@ pub fn ensure_kerai_file(home: &Path) -> Result<PathBuf, String> {
 }
 
 /// Parses `kerai.kerai` function-call lines into a key→value map.
-///
-/// Only lines matching the "name arg" pattern are parsed (no leading colon,
-/// no trailing colon on first token). Comments and definition lines are skipped.
 pub fn load_kerai_file(home: &Path) -> Result<HashMap<String, String>, String> {
     let path = home.join("kerai.kerai");
     if !path.exists() {
         return Ok(HashMap::new());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("failed to read kerai.kerai: {e}"))?;
-
-    let mut map = HashMap::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with("//") {
-            continue;
-        }
-        // Skip definition lines (:name target)
-        if trimmed.starts_with(':') {
-            continue;
-        }
-        let mut parts = trimmed.splitn(2, char::is_whitespace);
-        if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
-            // Skip type-annotation lines (name: type)
-            if key.ends_with(':') {
-                continue;
-            }
-            let value = value.trim();
-            if !key.is_empty() && !value.is_empty() {
-                map.insert(key.to_string(), value.to_string());
-            }
-        }
-    }
-    Ok(map)
+    let doc = lang::parse_file(&path)?;
+    Ok(lang::calls(&doc)
+        .into_iter()
+        .map(|(f, args)| (f.to_string(), args.join(" ")))
+        .collect())
 }
 
 /// Sets a key-value pair in `kerai.kerai`, replacing an existing line or appending.
@@ -124,32 +81,29 @@ pub fn set_kerai_value(home: &Path, key: &str, value: &str) -> Result<(), String
         KERAI_FILE_HEADER.to_string()
     };
 
+    let doc = lang::parse(&content);
     let mut found = false;
-    let mut lines: Vec<String> = content
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim();
-            if !trimmed.is_empty()
-                && !trimmed.starts_with('#')
-                && !trimmed.starts_with("//")
-                && !trimmed.starts_with(':')
-            {
-                if let Some((k, _)) = trimmed.split_once(char::is_whitespace) {
-                    if !k.ends_with(':') && k == key {
-                        found = true;
-                        return format!("{key} {value}");
-                    }
-                }
-            }
-            line.to_string()
-        })
-        .collect();
+    let mut output_lines: Vec<String> = Vec::with_capacity(doc.lines.len() + 1);
 
-    if !found {
-        lines.push(format!("{key} {value}"));
+    for line in &doc.lines {
+        match line {
+            lang::Line::Call {
+                function, args: _, ..
+            } if function == key => {
+                found = true;
+                output_lines.push(format!("{key} {value}"));
+            }
+            lang::Line::Empty => output_lines.push(String::new()),
+            lang::Line::Comment { text } => output_lines.push(text.clone()),
+            _ => output_lines.push(lang::render_line(line)),
+        }
     }
 
-    let mut output = lines.join("\n");
+    if !found {
+        output_lines.push(format!("{key} {value}"));
+    }
+
+    let mut output = output_lines.join("\n");
     if !output.ends_with('\n') {
         output.push('\n');
     }

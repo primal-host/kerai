@@ -3,6 +3,7 @@ mod commands;
 mod config;
 mod db;
 mod home;
+mod lang;
 mod output;
 
 use std::collections::HashMap;
