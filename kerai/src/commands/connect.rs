@@ -16,6 +16,20 @@ pub fn run(connection: &str, format: &OutputFormat) -> Result<(), String> {
         .simple_query("SELECT 1")
         .map_err(|e| format!("Connection test failed: {e}"))?;
 
+    // Seed default aliases into postgres (idempotent via upsert)
+    let default_aliases = [("pg", "postgres")];
+    for (name, target) in &default_aliases {
+        let _ = client.execute(
+            "SELECT kerai.set_preference('alias', $1, $2)",
+            &[name, target],
+        );
+    }
+
+    // Sync aliases cache from postgres
+    if let Err(e) = super::config_cmd::sync_aliases_from_db(&mut client) {
+        eprintln!("Warning: failed to sync aliases cache: {e}");
+    }
+
     let path = home.join("kerai.kerai");
     match format {
         OutputFormat::Json => {
