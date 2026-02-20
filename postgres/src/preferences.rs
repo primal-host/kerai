@@ -1,6 +1,6 @@
 use pgrx::prelude::*;
 
-use crate::sql::{sql_escape, sql_text};
+use crate::sql::sql_text;
 
 /// Get a preference value for the self instance.
 #[pg_extern]
@@ -75,7 +75,7 @@ fn list_preferences(
 
     let mut rows = Vec::new();
     Spi::connect(|client| {
-        let tup_table = client.select(&query, None, None).unwrap();
+        let tup_table = client.select(&query, None, &[]).unwrap();
         for row in tup_table {
             let key: String = row.get_by_name("key").unwrap().unwrap_or_default();
             let value: String = row.get_by_name("value").unwrap().unwrap_or_default();
