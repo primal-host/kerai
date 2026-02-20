@@ -1223,26 +1223,17 @@ dependencies = [
 name = "kerai-cli"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
  "comfy-table",
  "dirs",
- "postgres",
- "serde",
- "serde_json",
- "toml 0.8.23",
- "uuid",
-]
-
-[[package]]
-name = "kerai-web"
-version = "0.1.0"
-dependencies = [
- "axum",
  "futures",
+ "postgres",
  "serde",
  "serde_json",
  "tokio",
  "tokio-postgres",
+ "toml 0.8.23",
  "tower-http",
  "tracing",
  "tracing-subscriber",
