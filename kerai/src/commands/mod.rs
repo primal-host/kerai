@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod bounty;
+pub mod config_cmd;
 pub mod export;
 pub mod commit;
 pub mod connect;
@@ -266,6 +267,28 @@ pub enum Command {
     },
     ModelDelete {
         agent: String,
+    },
+    ConfigGet {
+        key: String,
+    },
+    ConfigSet {
+        key: String,
+        value: String,
+    },
+    ConfigList,
+    ConfigDelete {
+        key: String,
+    },
+    AliasGet {
+        name: String,
+    },
+    AliasSet {
+        name: String,
+        target: String,
+    },
+    AliasList,
+    AliasDelete {
+        name: String,
     },
 }
 
@@ -566,6 +589,18 @@ pub fn run(
         } => model::ensemble(&mut client, &agents, &context, top_k, format),
         Command::ModelInfo { agent } => model::info(&mut client, &agent, format),
         Command::ModelDelete { agent } => model::delete(&mut client, &agent, format),
+        Command::ConfigGet { key } => config_cmd::config_get(&mut client, &key, format),
+        Command::ConfigSet { key, value } => {
+            config_cmd::config_set(&mut client, &key, &value, format)
+        }
+        Command::ConfigList => config_cmd::config_list(&mut client, format),
+        Command::ConfigDelete { key } => config_cmd::config_delete(&mut client, &key, format),
+        Command::AliasGet { name } => config_cmd::alias_get(&mut client, &name, format),
+        Command::AliasSet { name, target } => {
+            config_cmd::alias_set(&mut client, &name, &target, format)
+        }
+        Command::AliasList => config_cmd::alias_list(&mut client, format),
+        Command::AliasDelete { name } => config_cmd::alias_delete(&mut client, &name, format),
         Command::Connect { .. } => unreachable!("handled before db::connect()"),
     }
 }
