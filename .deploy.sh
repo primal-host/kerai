@@ -9,7 +9,7 @@ cd "$(dirname "$0")"
 cargo build --release -p kerai-cli
 
 # Install binary
-sudo cp target/release/kerai /usr/local/bin/kerai
+sudo cp tgt/release/kerai /usr/local/bin/kerai
 
 # Restart launchd service
 sudo launchctl kickstart -k system/com.primal.kerai
