@@ -12,7 +12,7 @@ fi
 ~/apps/.launch.sh --git-only
 
 # Build release binary
-cargo build --release -p kerai-cli
+CARGO_TARGET_DIR="$(pwd)/tgt" cargo build --release -p kerai-cli
 
 # Install binary
 sudo cp tgt/release/kerai /usr/local/bin/kerai
