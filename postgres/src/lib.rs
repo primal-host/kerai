@@ -14,6 +14,7 @@ mod marketplace;
 mod microgpt;
 pub(crate) mod parser;
 mod peers;
+mod preferences;
 mod repo;
 mod perspectives;
 mod query;
