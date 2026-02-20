@@ -3,6 +3,8 @@ pub mod bounty;
 pub mod config_cmd;
 pub mod export;
 pub mod commit;
+pub mod init_cmd;
+pub mod stack_cmd;
 pub mod connect;
 pub mod consensus_cmd;
 pub mod currency;
@@ -290,6 +292,15 @@ pub enum Command {
     AliasDelete {
         name: String,
     },
+    InitPull,
+    InitPush,
+    InitDiff,
+    InitShow,
+    InitEdit,
+    StackShow,
+    StackList,
+    StackDrop,
+    StackClear,
 }
 
 pub fn run(
@@ -601,6 +612,20 @@ pub fn run(
         }
         Command::AliasList => config_cmd::alias_list(&mut client, format),
         Command::AliasDelete { name } => config_cmd::alias_delete(&mut client, &name, format),
+        Command::InitPull => init_cmd::pull(&mut client, format),
+        Command::InitPush => {
+            let result = init_cmd::push(&mut client, format);
+            // Sync aliases cache after push (may have changed aliases)
+            let _ = config_cmd::sync_aliases_from_db(&mut client);
+            result
+        }
+        Command::InitDiff => init_cmd::diff(&mut client, format),
+        Command::InitShow => init_cmd::show(&mut client, format),
+        Command::InitEdit => init_cmd::edit(&mut client, format),
+        Command::StackShow => stack_cmd::show(&mut client, format),
+        Command::StackList => stack_cmd::list(&mut client, format),
+        Command::StackDrop => stack_cmd::drop(&mut client, format),
+        Command::StackClear => stack_cmd::clear(&mut client, format),
         Command::Connect { .. } => unreachable!("handled before db::connect()"),
     }
 }

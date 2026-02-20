@@ -124,6 +124,18 @@ enum CliCommand {
         action: AliasAction,
     },
 
+    /// Init file workflow — pull/edit/push preferences via stack
+    Init {
+        #[command(subcommand)]
+        action: InitAction,
+    },
+
+    /// General-purpose content stack
+    Stack {
+        #[command(subcommand)]
+        action: StackAction,
+    },
+
     /// Start the web server
     Serve {
         /// Listen address (default: 0.0.0.0:62830)
@@ -866,6 +878,39 @@ enum AliasAction {
     },
 }
 
+#[derive(Subcommand)]
+enum InitAction {
+    /// Render preferences as init document and push onto stack
+    Pull,
+
+    /// Parse stack top and apply changes to preferences
+    Push,
+
+    /// Show what push would change without applying
+    Diff,
+
+    /// Display the current init document (stack top)
+    Show,
+
+    /// Open stack top in $EDITOR for editing
+    Edit,
+}
+
+#[derive(Subcommand)]
+enum StackAction {
+    /// View the top stack entry
+    Show,
+
+    /// List all stack entries
+    List,
+
+    /// Discard the top entry
+    Drop,
+
+    /// Clear all stack entries
+    Clear,
+}
+
 /// Known global flags that take a value argument.
 const FLAGS_WITH_VALUE: &[&str] = &["--db", "--profile", "--format"];
 
@@ -873,7 +918,7 @@ const FLAGS_WITH_VALUE: &[&str] = &["--db", "--profile", "--format"];
 const SUBCOMMANDS: &[&str] = &[
     "postgres", "sync", "perspective", "consensus", "peer",
     "agent", "task", "swarm", "market", "wallet", "bounty",
-    "currency", "model", "config", "alias", "serve",
+    "currency", "model", "config", "alias", "init", "stack", "serve",
 ];
 
 /// Notation switch tokens mapped to notation modes.
@@ -1433,6 +1478,19 @@ fn main() {
             AliasAction::Set { name, target } => commands::Command::AliasSet { name, target },
             AliasAction::List => commands::Command::AliasList,
             AliasAction::Delete { name } => commands::Command::AliasDelete { name },
+        },
+        CliCommand::Init { action } => match action {
+            InitAction::Pull => commands::Command::InitPull,
+            InitAction::Push => commands::Command::InitPush,
+            InitAction::Diff => commands::Command::InitDiff,
+            InitAction::Show => commands::Command::InitShow,
+            InitAction::Edit => commands::Command::InitEdit,
+        },
+        CliCommand::Stack { action } => match action {
+            StackAction::Show => commands::Command::StackShow,
+            StackAction::List => commands::Command::StackList,
+            StackAction::Drop => commands::Command::StackDrop,
+            StackAction::Clear => commands::Command::StackClear,
         },
         CliCommand::Currency { action } => match action {
             CurrencyAction::Register {
