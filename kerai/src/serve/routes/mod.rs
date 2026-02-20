@@ -5,9 +5,10 @@ pub mod models;
 pub mod nodes;
 pub mod perspectives;
 pub mod search;
+pub mod stack;
 pub mod ws;
 
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -50,6 +51,17 @@ pub fn build_router(pool: Arc<Pool>, notify_tx: broadcast::Sender<String>) -> Ro
         .route("/models/{agent}/info", get(models::model_info))
         .route("/models/{agent}", delete(models::delete_model))
         .route("/models/feedback", post(models::record_selection))
+        // Stack
+        .route("/stack", get(stack::stack_peek))
+        .route("/stack", put(stack::stack_replace))
+        .route("/stack", delete(stack::stack_drop))
+        .route("/stack/list", get(stack::stack_list))
+        .route("/stack/push", post(stack::stack_push))
+        .route("/stack/all", delete(stack::stack_clear))
+        // Init
+        .route("/init/pull", post(stack::init_pull))
+        .route("/init/push", post(stack::init_push))
+        .route("/init/diff", get(stack::init_diff))
         .with_state(pool);
 
     // WebSocket needs its own state
