@@ -1,5 +1,5 @@
 [workspace]
-members = ["postgres", "kerai", "web"]
+members = ["postgres", "kerai"]
 resolver = "2"
 
 [profile.dev]
