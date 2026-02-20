@@ -18,4 +18,6 @@ CARGO_TARGET_DIR="$(pwd)/tgt" cargo build --release -p kerai-cli
 sudo cp tgt/release/kerai /usr/local/bin/kerai
 
 # Restart launchd service
-sudo launchctl kickstart -k system/com.primal.kerai
+sudo launchctl bootout system/com.primal.kerai 2>/dev/null || true
+sudo cp com.primal.kerai.plist /Library/LaunchDaemons/
+sudo launchctl bootstrap system/ /Library/LaunchDaemons/com.primal.kerai.plist
