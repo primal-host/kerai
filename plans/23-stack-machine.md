@@ -8,6 +8,8 @@ Kerai already has Postgres as its data store and a growing set of parsers that c
 
 **Design principle**: Postgres is the universal backbone. All data — tables, nodes, session state, stack contents — lives in Postgres. Import brings data in, export serializes it out. The stack is a persistent workspace, not ephemeral memory.
 
+**Design principle**: Postgres all the way down. The interpreter state *is* the database. The stack, word definitions, dispatch table, object store — everything starts as Postgres rows and SQL operations. If a specific operation proves too slow (tight arithmetic loops, hot stack manipulation), promote just that piece to Rust. The database is the default; Rust is the escape hatch. Since pgrx runs Rust inside the Postgres process, a word like `+` can start as SQL and become a Rust function without changing its interface to the rest of the machine. Object IDs use Postgres sequences — stable, never renumbered, gaps are permanent. A pointer to object 42 is always object 42.
+
 ## Stack Pointer Structure
 
 ```rust
