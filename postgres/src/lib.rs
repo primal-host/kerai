@@ -24,6 +24,7 @@ mod schema;
 pub mod sql;
 mod stack;
 mod swarm;
+mod workspace;
 mod tasks;
 mod workers;
 mod zkp;

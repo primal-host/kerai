@@ -1,8 +1,11 @@
 pub mod ast;
 pub mod eval;
 pub mod expr;
+pub mod handlers;
+pub mod machine;
 mod parser;
 mod pratt;
+pub mod ptr;
 pub mod token;
 
 use std::fs;

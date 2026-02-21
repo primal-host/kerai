@@ -13,6 +13,7 @@ use axum::Router;
 use std::sync::Arc;
 use tokio::sync::broadcast;
 
+use super::auth;
 use super::db::Pool;
 use ws::WsState;
 
@@ -51,7 +52,7 @@ pub fn build_router(pool: Arc<Pool>, notify_tx: broadcast::Sender<String>) -> Ro
         .route("/models/{agent}/info", get(models::model_info))
         .route("/models/{agent}", delete(models::delete_model))
         .route("/models/feedback", post(models::record_selection))
-        // Stack
+        // Stack (legacy instance-scoped)
         .route("/stack", get(stack::stack_peek))
         .route("/stack", put(stack::stack_replace))
         .route("/stack", delete(stack::stack_drop))
@@ -62,19 +63,30 @@ pub fn build_router(pool: Arc<Pool>, notify_tx: broadcast::Sender<String>) -> Ro
         .route("/init/pull", post(stack::init_pull))
         .route("/init/push", post(stack::init_push))
         .route("/init/diff", get(stack::init_diff))
-        .with_state(pool);
+        .with_state(pool.clone());
 
     // WebSocket needs its own state
     let ws_router = Router::new()
         .route("/ws", get(ws::ws_handler))
         .with_state(ws_state);
 
+    // Eval route (stack machine)
     let eval_router = Router::new()
-        .route("/eval", post(eval::eval));
+        .route("/eval", post(eval::eval))
+        .with_state(pool.clone());
+
+    // Auth routes
+    let auth_router = Router::new()
+        .route("/session", get(auth::get_session))
+        .route("/bsky/start", post(auth::bsky_start))
+        .route("/bsky/callback", get(auth::bsky_callback))
+        .route("/logout", post(auth::logout))
+        .with_state(pool);
 
     Router::new()
         .route("/", get(eval::terminal_page))
         .nest("/api", api)
         .nest("/api", ws_router)
         .nest("/api", eval_router)
+        .nest("/auth", auth_router)
 }

@@ -1,0 +1,62 @@
+pub mod arithmetic;
+pub mod login;
+pub mod stack_ops;
+pub mod workspace;
+
+use std::collections::HashMap;
+
+use super::machine::Handler;
+
+/// Register all handlers and type methods.
+/// Returns (global_handlers, type_methods).
+pub fn register_all() -> (HashMap<String, Handler>, HashMap<(String, String), Handler>) {
+    let mut handlers: HashMap<String, Handler> = HashMap::new();
+    let mut type_methods: HashMap<(String, String), Handler> = HashMap::new();
+
+    // Stack operations
+    handlers.insert("dup".into(), stack_ops::dup);
+    handlers.insert("drop".into(), stack_ops::drop);
+    handlers.insert("swap".into(), stack_ops::swap);
+    handlers.insert("over".into(), stack_ops::over);
+    handlers.insert("rot".into(), stack_ops::rot);
+    handlers.insert("clear".into(), stack_ops::clear);
+    handlers.insert("view".into(), stack_ops::view);
+    handlers.insert("depth".into(), stack_ops::depth);
+
+    // Arithmetic operators
+    handlers.insert("+".into(), arithmetic::add);
+    handlers.insert("-".into(), arithmetic::sub);
+    handlers.insert("*".into(), arithmetic::mul);
+    handlers.insert("/".into(), arithmetic::div);
+    handlers.insert("%".into(), arithmetic::modulo);
+
+    // Library pushers
+    handlers.insert("workspace".into(), workspace::workspace_lib);
+    handlers.insert("login".into(), login::login_lib);
+
+    // Workspace library methods
+    type_methods.insert(
+        ("library:workspace".into(), "list".into()),
+        workspace::ws_list,
+    );
+    type_methods.insert(
+        ("library:workspace".into(), "load".into()),
+        workspace::ws_load,
+    );
+    type_methods.insert(
+        ("library:workspace".into(), "new".into()),
+        workspace::ws_new,
+    );
+    type_methods.insert(
+        ("library:workspace".into(), "save".into()),
+        workspace::ws_save,
+    );
+
+    // Login library methods
+    type_methods.insert(
+        ("library:login".into(), "bsky".into()),
+        login::login_bsky,
+    );
+
+    (handlers, type_methods)
+}

@@ -8,9 +8,27 @@
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{overflow:hidden;background:#0d1117;color:#c9d1d9;font-family:'SF Mono','Cascadia Code','Fira Code',monospace;font-size:14px}
 body{display:flex;flex-direction:column}
-#output{flex:1;overflow-y:auto;padding:12px 16px;white-space:pre-wrap;word-break:break-all}
-.line-input{color:#c9d1d9}.line-output{color:#7ee787}.line-error{color:#f85149}
-.line-info{color:#58a6ff}
+#header{display:flex;justify-content:space-between;align-items:center;padding:6px 16px;background:#161b22;border-bottom:1px solid #21262d;user-select:none}
+#header-title{color:#58a6ff;font-weight:bold;font-size:15px}
+#header-actions button{background:transparent;border:1px solid #30363d;color:#8b949e;padding:2px 10px;border-radius:4px;cursor:pointer;font:inherit;font-size:12px}
+#header-actions button:hover{color:#c9d1d9;border-color:#58a6ff}
+#stack-area{flex:1;overflow-y:auto;padding:12px 0;display:flex;flex-direction:column;justify-content:flex-end}
+.stack-empty{color:#484f58;text-align:center;padding:20px;font-style:italic}
+.stack-item{display:flex;align-items:flex-start;padding:2px 16px;line-height:1.5}
+.stack-item:hover{background:#161b22}
+.stack-rowid{color:#484f58;min-width:64px;text-align:right;margin-right:12px;flex-shrink:0;font-size:13px}
+.stack-content{flex:1;white-space:pre-wrap;word-break:break-all}
+.kind-int,.kind-float{color:#79c0ff}
+.kind-text{color:#a5d6ff}
+.kind-list{color:#d2a8ff}
+.kind-error{color:#f85149}
+.kind-library{color:#ffa657}
+.kind-workspace_list{color:#7ee787}
+.kind-auth_pending{color:#d29922}
+.kind-session{color:#58a6ff}
+.ws-item{display:block;padding:2px 0;cursor:pointer}
+.ws-item:hover{text-decoration:underline}
+.ws-active{font-weight:bold}
 #input-row{display:flex;align-items:center;padding:4px 16px 8px;border-top:1px solid #21262d;background:#0d1117}
 #prompt{color:#58a6ff;margin-right:8px;white-space:nowrap;user-select:none}
 #input{flex:1;background:transparent;border:none;outline:none;color:#c9d1d9;font:inherit;caret-color:#58a6ff}
@@ -18,53 +36,152 @@ body{display:flex;flex-direction:column}
 </style>
 </head>
 <body>
-<div id="output"></div>
+<div id="header">
+  <span id="header-title">ker.ai</span>
+  <div id="header-actions">
+    <button id="btn-login" onclick="doLogin()">Login</button>
+  </div>
+</div>
+<div id="stack-area"><div class="stack-empty">empty stack</div></div>
 <div id="input-row"><span id="prompt">kerai&gt;</span><input id="input" autofocus autocomplete="off" spellcheck="false"></div>
-<div id="status"><span id="status-notation">infix</span><span id="status-right">ker.ai</span></div>
+<div id="status"><span id="status-notation">postfix</span><span id="status-workspace">...</span></div>
 <script>
 (function(){
 function setHeight(){document.body.style.height=window.innerHeight+'px'}
 setHeight();
 window.addEventListener('resize',setHeight);
 
-const output=document.getElementById('output');
+const stackArea=document.getElementById('stack-area');
 const input=document.getElementById('input');
 const statusNotation=document.getElementById('status-notation');
-let notation='infix';
+const statusWorkspace=document.getElementById('status-workspace');
+const btnLogin=document.getElementById('btn-login');
+
+let session=null;
 let history=[];
 let histIdx=-1;
 let savedInput='';
 
-const NOTATION_MAP={
-  '.pre':'prefix','.prefix':'prefix','.b':'prefix',
-  '.in':'infix','.infix':'infix','.c':'infix',
-  '.post':'postfix','.postfix':'postfix','.a':'postfix'
-};
-
-function appendLine(text,cls){
-  const el=document.createElement('div');
-  el.className=cls;
-  el.textContent=text;
-  output.appendChild(el);
-  output.scrollTop=output.scrollHeight;
+// Initialize session
+async function initSession(){
+  try{
+    const res=await fetch('/auth/session',{credentials:'include'});
+    session=await res.json();
+    statusWorkspace.textContent=session.workspace_name||'...';
+    if(session.handle){
+      btnLogin.textContent=session.handle;
+    }
+    // Store session token as cookie for subsequent requests
+    document.cookie='kerai_session='+session.token+';path=/;max-age=2592000;SameSite=Lax';
+  }catch(e){
+    statusWorkspace.textContent='offline';
+  }
 }
 
-function setNotation(n){
-  notation=n;
-  statusNotation.textContent=n;
+function renderStack(stack){
+  stackArea.innerHTML='';
+  if(!stack||stack.length===0){
+    stackArea.innerHTML='<div class="stack-empty">empty stack</div>';
+    return;
+  }
+  // Stack renders bottom-up: oldest at top, newest at bottom (position 0 = top of display means oldest)
+  stack.forEach(function(item){
+    const row=document.createElement('div');
+    row.className='stack-item';
+
+    const rowid=document.createElement('span');
+    rowid.className='stack-rowid';
+    rowid.textContent=item.id||'';
+
+    const content=document.createElement('span');
+    content.className='stack-content kind-'+item.kind;
+    content.textContent=formatPtr(item);
+
+    row.appendChild(rowid);
+    row.appendChild(content);
+    stackArea.appendChild(row);
+  });
+  stackArea.scrollTop=stackArea.scrollHeight;
+}
+
+function formatPtr(ptr){
+  switch(ptr.kind){
+    case 'int': return ptr.ref_id;
+    case 'float':{
+      const s=ptr.ref_id;
+      return s.endsWith('.0')?s.slice(0,-2):s;
+    }
+    case 'text':{
+      const s=ptr.ref_id;
+      return s.length>60?'"'+s.slice(0,57)+'..."':'"'+s+'"';
+    }
+    case 'list':{
+      try{
+        const items=Array.isArray(ptr.meta)?ptr.meta:[];
+        const shown=items.slice(0,10).map(formatPtr).join(' ');
+        return '['+shown+(items.length>10?'...':'')+']';
+      }catch(e){return '[]';}
+    }
+    case 'workspace_list':{
+      const items=(ptr.meta&&ptr.meta.items)||[];
+      return 'workspaces:\n'+items.map(function(w,i){
+        const mark=w.is_active?' *':'';
+        return '  '+(i+1)+'. '+w.name+' ('+w.item_count+' items)'+mark;
+      }).join('\n');
+    }
+    case 'auth_pending':{
+      const msg=(ptr.meta&&ptr.meta.message)||'authenticating...';
+      return msg;
+    }
+    case 'session':{
+      const handle=(ptr.meta&&ptr.meta.handle)||'anonymous';
+      const provider=(ptr.meta&&ptr.meta.provider)||'?';
+      return 'session: '+handle+' ('+provider+')';
+    }
+    case 'error': return 'error: '+ptr.ref_id;
+    case 'library': return '['+ptr.ref_id+']';
+    default: return ptr.kind+':'+ptr.ref_id;
+  }
 }
 
 async function sendEval(expr){
+  if(!session)return;
   try{
     const res=await fetch('/api/eval',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({input:expr,notation:notation})
+      credentials:'include',
+      body:JSON.stringify({input:expr,session_token:session.token})
     });
     const data=await res.json();
-    appendLine(data.output,data.error?'line-error':'line-output');
+    renderStack(data.stack);
+
+    // Check for workspace switch — update status
+    // If the last item is auth_pending, could redirect
+    if(data.stack&&data.stack.length>0){
+      const last=data.stack[data.stack.length-1];
+      if(last.kind==='auth_pending'&&last.meta&&last.meta.url){
+        // Could auto-redirect: window.location.href=last.meta.url;
+      }
+    }
+
+    // Check if workspace changed (look for workspace_load_request resolution)
+    // Re-fetch session to get updated workspace name
+    const sres=await fetch('/auth/session',{credentials:'include'});
+    const newSession=await sres.json();
+    if(newSession.workspace_name){
+      statusWorkspace.textContent=newSession.workspace_name;
+      // Update token if changed
+      if(newSession.token!==session.token){
+        session=newSession;
+        document.cookie='kerai_session='+session.token+';path=/;max-age=2592000;SameSite=Lax';
+      }else{
+        session.workspace_name=newSession.workspace_name;
+        session.workspace_id=newSession.workspace_id;
+      }
+    }
   }catch(e){
-    appendLine('error: network request failed','line-error');
+    stackArea.innerHTML='<div class="stack-empty">error: network request failed</div>';
   }
 }
 
@@ -75,45 +192,32 @@ async function handleSubmit(){
   const trimmed=raw.trim();
   if(!trimmed)return;
 
-  // Push to history
   if(history.length===0||history[history.length-1]!==trimmed){
     history.push(trimmed);
   }
 
-  appendLine('kerai> '+trimmed,'line-input');
-
   // Local commands
-  if(trimmed==='exit'||trimmed==='quit'){
-    appendLine('Use Ctrl-D or close the tab to exit.','line-info');
-    return;
-  }
-  if(trimmed==='clear'){
-    output.innerHTML='';
-    return;
-  }
   if(trimmed==='help'){
-    appendLine('Notation modes: .pre .in .post (or .prefix .infix .postfix)','line-info');
-    appendLine('Operators: + - * / %','line-info');
-    appendLine('Literals: integers, floats, hex (0xFF)','line-info');
-    appendLine('Commands: clear, help, exit','line-info');
-    return;
-  }
-
-  // Check for notation switch
-  const parts=trimmed.split(/\s+/);
-  const first=parts[0];
-  if(NOTATION_MAP[first]){
-    setNotation(NOTATION_MAP[first]);
-    const rest=parts.slice(1).join(' ').trim();
-    if(!rest){
-      appendLine('notation: '+notation,'line-info');
-      return;
-    }
-    await sendEval(rest);
+    stackArea.innerHTML=[
+      '<div class="stack-item"><span class="stack-rowid"></span><span class="stack-content kind-text">Stack commands: dup drop swap over rot clear depth view</span></div>',
+      '<div class="stack-item"><span class="stack-rowid"></span><span class="stack-content kind-text">Arithmetic: + - * / %</span></div>',
+      '<div class="stack-item"><span class="stack-rowid"></span><span class="stack-content kind-text">Literals: integers, floats, hex (0xFF), "quoted strings", [lists]</span></div>',
+      '<div class="stack-item"><span class="stack-rowid"></span><span class="stack-content kind-text">Libraries: workspace (list/load/new/save), login (bsky)</span></div>',
+      '<div class="stack-item"><span class="stack-rowid"></span><span class="stack-content kind-text">Commands: help, clear (local)</span></div>'
+    ].join('');
     return;
   }
 
   await sendEval(trimmed);
+}
+
+function doLogin(){
+  if(session&&session.auth_provider!=='anonymous'){
+    // Already logged in — could show profile or logout
+    sendEval('login bsky');
+  }else{
+    sendEval('login bsky');
+  }
 }
 
 input.addEventListener('keydown',function(e){
@@ -142,18 +246,15 @@ input.addEventListener('keydown',function(e){
     }
   }else if(e.key==='l'&&e.ctrlKey){
     e.preventDefault();
-    output.innerHTML='';
+    stackArea.innerHTML='<div class="stack-empty">empty stack</div>';
   }
 });
 
-// Focus input on click anywhere
-document.addEventListener('click',function(){input.focus()});
+document.addEventListener('click',function(e){
+  if(!e.target.closest('button'))input.focus();
+});
 
-// Welcome
-appendLine('ker.ai — interactive calculator','line-info');
-appendLine('Type an expression, e.g. 3 + 4 * 2','line-info');
-appendLine('Switch notation: .pre .in .post | Commands: help, clear','line-info');
-appendLine('','line-info');
+initSession();
 })();
 </script>
 </body>

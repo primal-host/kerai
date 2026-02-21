@@ -739,6 +739,78 @@ CREATE INDEX idx_stack_instance ON kerai.stack (instance_id);
     requires = ["table_instances"]
 );
 
+// Table: users — authenticated and anonymous users
+extension_sql!(
+    r#"
+CREATE TABLE kerai.users (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    did            TEXT UNIQUE,
+    handle         TEXT,
+    auth_provider  TEXT NOT NULL DEFAULT 'anonymous',
+    auth_token     TEXT,
+    created_at     TIMESTAMPTZ DEFAULT now(),
+    last_login     TIMESTAMPTZ DEFAULT now()
+);
+"#,
+    name = "table_users",
+    requires = ["schema_bootstrap"]
+);
+
+// Table: workspaces — per-user workspace containers
+extension_sql!(
+    r#"
+CREATE TABLE kerai.workspaces (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        UUID NOT NULL REFERENCES kerai.users(id),
+    name           TEXT NOT NULL,
+    is_active      BOOLEAN DEFAULT false,
+    is_anonymous   BOOLEAN DEFAULT false,
+    created_at     TIMESTAMPTZ DEFAULT now(),
+    updated_at     TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (user_id, name)
+);
+"#,
+    name = "table_workspaces",
+    requires = ["table_users"]
+);
+
+// Table: stack_items — typed stack items per workspace
+extension_sql!(
+    r#"
+CREATE SEQUENCE kerai.stack_item_id_seq;
+
+CREATE TABLE kerai.stack_items (
+    id             BIGINT PRIMARY KEY DEFAULT nextval('kerai.stack_item_id_seq'),
+    workspace_id   UUID NOT NULL REFERENCES kerai.workspaces(id) ON DELETE CASCADE,
+    position       INTEGER NOT NULL,
+    kind           TEXT NOT NULL,
+    ref_id         TEXT NOT NULL DEFAULT '',
+    meta           JSONB NOT NULL DEFAULT '{}',
+    created_at     TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX idx_stack_items_workspace_position ON kerai.stack_items (workspace_id, position);
+"#,
+    name = "table_stack_items",
+    requires = ["table_workspaces"]
+);
+
+// Table: sessions — user sessions with workspace binding
+extension_sql!(
+    r#"
+CREATE TABLE kerai.sessions (
+    id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id        UUID NOT NULL REFERENCES kerai.users(id),
+    workspace_id   UUID NOT NULL REFERENCES kerai.workspaces(id),
+    token          TEXT NOT NULL UNIQUE,
+    created_at     TIMESTAMPTZ DEFAULT now(),
+    expires_at     TIMESTAMPTZ DEFAULT now() + interval '30 days'
+);
+CREATE INDEX idx_sessions_token ON kerai.sessions (token);
+"#,
+    name = "table_sessions",
+    requires = ["table_users", "table_workspaces"]
+);
+
 // Table: csv_projects — CSV import project registry
 extension_sql!(
     r#"

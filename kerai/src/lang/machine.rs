@@ -1,0 +1,339 @@
+use std::collections::HashMap;
+
+use super::ptr::Ptr;
+use super::token::{tokenize, TokenKind};
+
+/// Handler function signature for stack machine commands.
+pub type Handler = fn(machine: &mut Machine) -> Result<(), String>;
+
+/// The stack machine: dispatches words against registered handlers and type methods.
+/// Purely synchronous — async DB operations happen in the serve layer.
+pub struct Machine {
+    pub workspace_id: uuid::Uuid,
+    pub user_id: uuid::Uuid,
+    pub stack: Vec<Ptr>,
+    /// Global word handlers (e.g., "login", "workspace", "clear").
+    handlers: HashMap<String, Handler>,
+    /// Type-dispatched methods: (kind, word) → handler.
+    /// For library dispatch: ("library:workspace", "list").
+    type_methods: HashMap<(String, String), Handler>,
+}
+
+impl Machine {
+    pub fn new(
+        workspace_id: uuid::Uuid,
+        user_id: uuid::Uuid,
+        handlers: HashMap<String, Handler>,
+        type_methods: HashMap<(String, String), Handler>,
+    ) -> Self {
+        Self {
+            workspace_id,
+            user_id,
+            stack: Vec::new(),
+            handlers,
+            type_methods,
+        }
+    }
+
+    /// Execute an input string through the stack machine.
+    pub fn execute(&mut self, input: &str) -> Result<(), String> {
+        let tokens = tokenize(input);
+        let mut i = 0;
+
+        while i < tokens.len() {
+            let token = &tokens[i];
+            i += 1;
+
+            match token.kind {
+                TokenKind::LBracket => {
+                    // Collect list elements until matching RBracket
+                    let mut depth = 1;
+                    let mut list_tokens = Vec::new();
+                    while i < tokens.len() && depth > 0 {
+                        match tokens[i].kind {
+                            TokenKind::LBracket => {
+                                depth += 1;
+                                list_tokens.push(tokens[i].clone());
+                            }
+                            TokenKind::RBracket => {
+                                depth -= 1;
+                                if depth > 0 {
+                                    list_tokens.push(tokens[i].clone());
+                                }
+                            }
+                            _ => list_tokens.push(tokens[i].clone()),
+                        }
+                        i += 1;
+                    }
+                    // Parse list elements as literals
+                    let items: Vec<Ptr> = list_tokens
+                        .iter()
+                        .filter(|t| t.kind == TokenKind::Word)
+                        .map(|t| parse_literal(&t.value, t.quoted))
+                        .collect();
+                    self.stack.push(Ptr::list(items));
+                }
+                TokenKind::RBracket | TokenKind::LParen | TokenKind::RParen => {
+                    // Stray structural tokens — ignore
+                }
+                TokenKind::Word => {
+                    let word = &token.value;
+
+                    // 1. Quoted strings are always text literals
+                    if token.quoted {
+                        self.stack.push(Ptr::text(word));
+                        continue;
+                    }
+
+                    // 2. Try parse as literal (int, float)
+                    if let Some(ptr) = try_parse_number(word) {
+                        self.stack.push(ptr);
+                        continue;
+                    }
+
+                    // 3. Check global handlers
+                    if let Some(handler) = self.handlers.get(word.as_str()).copied() {
+                        if let Err(e) = handler(self) {
+                            self.stack.push(Ptr::error(&e));
+                        }
+                        continue;
+                    }
+
+                    // 4. Check dot-form: "a.b" → lookup as handler
+                    if word.contains('.') {
+                        if let Some(handler) = self.handlers.get(word.as_str()).copied() {
+                            if let Err(e) = handler(self) {
+                                self.stack.push(Ptr::error(&e));
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 5. If stack top is a library, dispatch as library method
+                    if let Some(top) = self.stack.last() {
+                        if top.kind == "library" {
+                            let lib_key = format!("library:{}", top.ref_id);
+                            let method_key = (lib_key, word.to_string());
+                            if let Some(handler) = self.type_methods.get(&method_key).copied() {
+                                // Pop the library marker before dispatching
+                                self.stack.pop();
+                                if let Err(e) = handler(self) {
+                                    self.stack.push(Ptr::error(&e));
+                                }
+                                continue;
+                            }
+                        }
+                    }
+
+                    // 6. Check type methods on stack top
+                    if let Some(top) = self.stack.last() {
+                        let type_key = (top.kind.clone(), word.to_string());
+                        if let Some(handler) = self.type_methods.get(&type_key).copied() {
+                            if let Err(e) = handler(self) {
+                                self.stack.push(Ptr::error(&e));
+                            }
+                            continue;
+                        }
+                    }
+
+                    // 7. Unknown word — push as error
+                    self.stack.push(Ptr::error(&format!("unknown word: {word}")));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Push a Ptr onto the stack.
+    pub fn push(&mut self, ptr: Ptr) {
+        self.stack.push(ptr);
+    }
+
+    /// Pop the top Ptr from the stack.
+    pub fn pop(&mut self) -> Option<Ptr> {
+        self.stack.pop()
+    }
+
+    /// Peek at the top of the stack.
+    pub fn peek(&self) -> Option<&Ptr> {
+        self.stack.last()
+    }
+
+    /// Stack depth.
+    pub fn depth(&self) -> usize {
+        self.stack.len()
+    }
+}
+
+/// Parse a token value as a literal Ptr (int or float).
+fn try_parse_number(s: &str) -> Option<Ptr> {
+    // Hex literal
+    if let Some(hex) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        if let Ok(n) = i64::from_str_radix(hex, 16) {
+            return Some(Ptr::int(n));
+        }
+    }
+    if let Ok(n) = s.parse::<i64>() {
+        return Some(Ptr::int(n));
+    }
+    if let Ok(f) = s.parse::<f64>() {
+        return Some(Ptr::float(f));
+    }
+    None
+}
+
+/// Parse a literal value — if it's a number, make it numeric; otherwise text.
+fn parse_literal(s: &str, quoted: bool) -> Ptr {
+    if quoted {
+        return Ptr::text(s);
+    }
+    try_parse_number(s).unwrap_or_else(|| Ptr::text(s))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lang::handlers;
+
+    fn test_machine() -> Machine {
+        let (handlers, type_methods) = handlers::register_all();
+        Machine::new(uuid::Uuid::nil(), uuid::Uuid::nil(), handlers, type_methods)
+    }
+
+    #[test]
+    fn push_integers() {
+        let mut m = test_machine();
+        m.execute("42 7").unwrap();
+        assert_eq!(m.stack.len(), 2);
+        assert_eq!(m.stack[0], Ptr::int(42));
+        assert_eq!(m.stack[1], Ptr::int(7));
+    }
+
+    #[test]
+    fn push_float() {
+        let mut m = test_machine();
+        m.execute("3.14").unwrap();
+        assert_eq!(m.stack[0].kind, "float");
+    }
+
+    #[test]
+    fn push_hex() {
+        let mut m = test_machine();
+        m.execute("0xFF").unwrap();
+        assert_eq!(m.stack[0], Ptr::int(255));
+    }
+
+    #[test]
+    fn push_quoted_string() {
+        let mut m = test_machine();
+        m.execute("\"hello world\"").unwrap();
+        assert_eq!(m.stack[0], Ptr::text("hello world"));
+    }
+
+    #[test]
+    fn push_list() {
+        let mut m = test_machine();
+        m.execute("[1 2 3]").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0].kind, "list");
+    }
+
+    #[test]
+    fn arithmetic_add() {
+        let mut m = test_machine();
+        m.execute("3 4 +").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0], Ptr::int(7));
+    }
+
+    #[test]
+    fn arithmetic_mixed() {
+        let mut m = test_machine();
+        m.execute("3 4.0 +").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0].kind, "float");
+        assert_eq!(m.stack[0].as_float(), Some(7.0));
+    }
+
+    #[test]
+    fn dup_top() {
+        let mut m = test_machine();
+        m.execute("42 dup").unwrap();
+        assert_eq!(m.stack.len(), 2);
+        assert_eq!(m.stack[0], Ptr::int(42));
+        assert_eq!(m.stack[1], Ptr::int(42));
+    }
+
+    #[test]
+    fn drop_top() {
+        let mut m = test_machine();
+        m.execute("1 2 3 drop").unwrap();
+        assert_eq!(m.stack.len(), 2);
+    }
+
+    #[test]
+    fn swap_top_two() {
+        let mut m = test_machine();
+        m.execute("1 2 swap").unwrap();
+        assert_eq!(m.stack[0], Ptr::int(2));
+        assert_eq!(m.stack[1], Ptr::int(1));
+    }
+
+    #[test]
+    fn clear_stack() {
+        let mut m = test_machine();
+        m.execute("1 2 3 clear").unwrap();
+        assert!(m.stack.is_empty());
+    }
+
+    #[test]
+    fn unknown_word_error() {
+        let mut m = test_machine();
+        m.execute("frobnicate").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0].kind, "error");
+    }
+
+    #[test]
+    fn library_dispatch() {
+        let mut m = test_machine();
+        m.execute("workspace").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0].kind, "library");
+        assert_eq!(m.stack[0].ref_id, "workspace");
+    }
+
+    #[test]
+    fn division_by_zero() {
+        let mut m = test_machine();
+        m.execute("1 0 /").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0].kind, "error");
+    }
+
+    #[test]
+    fn workspace_list_dispatch() {
+        let mut m = test_machine();
+        m.execute("workspace list").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0].kind, "workspace_list_request");
+    }
+
+    #[test]
+    fn login_bsky_dispatch() {
+        let mut m = test_machine();
+        m.execute("login bsky").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0].kind, "auth_pending_request");
+    }
+
+    #[test]
+    fn chained_arithmetic() {
+        let mut m = test_machine();
+        // RPN: 2 3 + 4 * = (2+3)*4 = 20
+        m.execute("2 3 + 4 *").unwrap();
+        assert_eq!(m.stack.len(), 1);
+        assert_eq!(m.stack[0], Ptr::int(20));
+    }
+}
