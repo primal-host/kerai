@@ -113,6 +113,93 @@ Word resolution order:
 
 This gives both explicit commands and type-dispatched methods.
 
+## Libraries as Namespaces
+
+The current CLI's top-level command groups (`postgres`, `wallet`, `swarm`, `model`, `csv`, etc.) become **libraries** — namespaces of words. Each library name is itself a word that pushes a library pointer onto the stack.
+
+### Dot Form vs. Space Form
+
+Both forms resolve to the same handler:
+
+```
+postgres.ping          # dot form — direct call, single token
+postgres ping          # space form — push library, then dispatch "ping" on it
+```
+
+The dot form is compact for scripts. The space form reads naturally on the command line and in conversation.
+
+### Argument Placement Rule
+
+**Arguments go before the word that consumes them.** This is the fundamental postfix principle applied consistently:
+
+- **Library configuration** (connection strings, hosts) goes before the library word
+- **Action arguments** (patterns, table names, counts) go before the action word
+
+```
+"123.12.1.0" postgres ping                  # address → postgres, ping takes nothing
+"123.12.1.0" postgres "%parse%" find        # address → postgres, pattern → find
+postgres "%parse%" find                      # default postgres, pattern → find
+postgres ping                                # default postgres, ping takes nothing
+"prod-db" postgres "m_teams" 10 rows        # connect to prod, get 10 rows from m_teams
+```
+
+Each word consumes exactly what belongs to it. Library words consume configuration. Action words consume action arguments. Reads left-to-right as "configure, then act."
+
+### Library Pointer Dispatch
+
+When the machine encounters a library name like `postgres`:
+
+1. Check the stack top — if there's an address/connection string, pop it and bind
+2. Push `Ptr { kind: "library", ref_id: "postgres", meta: { "host": "..." } }`
+
+When the next word (e.g., `ping`) executes:
+
+1. See `kind: "library"` on stack top → look up `("library:postgres", "ping")` in type_methods
+2. Resolves to the same handler as the dot form `postgres.ping`
+
+### Aliases
+
+Libraries can be aliased like any definition:
+
+```
+pg: postgres
+pg ping                    # same as postgres ping
+pg.ping                    # same as postgres.ping
+```
+
+### Shell Invocation
+
+Everything after `kerai` on the command line is input to the postfix interpreter:
+
+```bash
+kerai postgres ping                         # evaluate "postgres ping"
+kerai "123.12.1.0" postgres ping            # evaluate with remote host
+kerai "/path/to/dir" csv import             # evaluate csv import
+kerai 1 2 +                                 # evaluate arithmetic
+kerai                                       # no args → REPL
+```
+
+The shell's word splitting tokenizes for free. Quoted strings pass through as single tokens. This **replaces the clap subcommand tree entirely** — the kerai binary joins `argv[1..]` into a postfix expression, evaluates it, prints the stack, and exits.
+
+### Current CLI Groups → Libraries
+
+| Current CLI | Library | Example Words |
+|------------|---------|---------------|
+| `kerai postgres <action>` | `postgres` | `ping`, `find`, `query`, `tree`, `refs`, `import`, `export` |
+| `kerai postgres import-csv` | `csv` | `import`, `export` |
+| `kerai wallet <action>` | `wallet` | `create`, `balance`, `transfer`, `history` |
+| `kerai currency <action>` | `currency` | `register`, `transfer`, `supply`, `schedule` |
+| `kerai market <action>` | `market` | `create`, `bid`, `settle`, `browse`, `stats` |
+| `kerai bounty <action>` | `bounty` | `create`, `list`, `show`, `claim`, `settle` |
+| `kerai swarm <action>` | `swarm` | `launch`, `status`, `stop`, `leaderboard` |
+| `kerai model <action>` | `model` | `create`, `train`, `predict`, `search`, `info` |
+| `kerai agent <action>` | `agent` | `add`, `list`, `remove`, `info` |
+| `kerai peer <action>` | `peer` | `add`, `list`, `remove`, `info` |
+| `kerai config <action>` | `config` | `get`, `set`, `list`, `delete` |
+| `kerai alias <action>` | `alias` | `get`, `set`, `list`, `delete` |
+
+Generic words that dispatch on stack type rather than belonging to a namespace: `edit`, `export`, `import`, `info`, `list`, `show`, `delete`.
+
 ## Composable Command Chains
 
 ```
