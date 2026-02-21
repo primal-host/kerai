@@ -5,8 +5,8 @@ session.*.log
 .claude/
 
 # Rust/pgrx build artifacts
-/target
-/tgt
+target/
+tgt/
 *.so
 *.dylib
 *.dll

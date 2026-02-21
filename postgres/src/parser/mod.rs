@@ -26,6 +26,7 @@ mod treesitter;
 pub mod go;
 pub mod c;
 pub mod latex;
+pub mod csv;
 
 use ast_walker::NodeRow;
 use comment_extractor::{CommentBlock, CommentPlacement};

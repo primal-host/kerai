@@ -40,6 +40,7 @@ regex = "1"
 tempfile = "3"
 tree-sitter-latex = { git = "https://github.com/latex-lsp/tree-sitter-latex.git", branch = "master" }
 biblatex = "0.11"
+csv = "1"
 
 [dev-dependencies]
 pgrx-tests = "=0.17.0"

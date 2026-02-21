@@ -62,6 +62,44 @@ pub fn run(
     Ok(())
 }
 
+pub fn run_csv(
+    client: &mut Client,
+    path: &str,
+    schema: &str,
+    project: &str,
+    format: &OutputFormat,
+) -> Result<(), String> {
+    let resolved = std::fs::canonicalize(path)
+        .map_err(|e| format!("Invalid path '{}': {}", path, e))?;
+    let resolved_str = resolved.to_string_lossy();
+
+    // Ensure extension is loaded
+    crate::db::ensure_extension(client)?;
+
+    let is_dir = resolved.is_dir();
+
+    let sql = if is_dir {
+        format!(
+            "SELECT kerai.parse_csv_dir($1, $2, $3)::text"
+        )
+    } else {
+        format!(
+            "SELECT kerai.parse_csv_file($1, $2, $3)::text"
+        )
+    };
+
+    let row = client
+        .query_one(&sql, &[&resolved_str.as_ref(), &schema, &project])
+        .map_err(|e| format!("CSV import failed: {}", e))?;
+
+    let text: String = row.get(0);
+    let value: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| format!("Invalid JSON: {}", e))?;
+
+    print_json(&value, format);
+    Ok(())
+}
+
 fn add_to_gitignore(project_path: &Path) {
     let gitignore = project_path.join(".gitignore");
     if gitignore.exists() {

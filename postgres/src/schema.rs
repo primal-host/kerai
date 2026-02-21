@@ -599,6 +599,7 @@ INSERT INTO kerai.reward_schedule (work_type, reward) VALUES
     ('parse_file',        10000000000),  -- 10 Koi
     ('parse_crate',       50000000000),  -- 50 Koi
     ('parse_markdown',    10000000000),  -- 10 Koi
+    ('parse_csv',         10000000000),  -- 10 Koi
     ('create_version',     5000000000),  --  5 Koi
     ('bounty_settlement', 20000000000),  -- 20 Koi
     ('peer_sync',         15000000000),  -- 15 Koi
@@ -736,4 +737,39 @@ CREATE INDEX idx_stack_instance ON kerai.stack (instance_id);
 "#,
     name = "table_stack",
     requires = ["table_instances"]
+);
+
+// Table: csv_projects — CSV import project registry
+extension_sql!(
+    r#"
+CREATE TABLE kerai.csv_projects (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name        TEXT NOT NULL UNIQUE,
+    schema_name TEXT NOT NULL,
+    source_dir  TEXT,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+"#,
+    name = "table_csv_projects",
+    requires = ["schema_bootstrap"]
+);
+
+// Table: csv_files — CSV file registry per project
+extension_sql!(
+    r#"
+CREATE TABLE kerai.csv_files (
+    id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    project_id  UUID NOT NULL REFERENCES kerai.csv_projects(id),
+    filename    TEXT NOT NULL,
+    table_name  TEXT NOT NULL,
+    headers     TEXT[] NOT NULL,
+    row_count   INTEGER,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (project_id, filename)
+);
+
+CREATE INDEX idx_csv_files_project ON kerai.csv_files (project_id);
+"#,
+    name = "table_csv_files",
+    requires = ["table_csv_projects"]
 );

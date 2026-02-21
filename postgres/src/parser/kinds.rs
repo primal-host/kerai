@@ -129,6 +129,11 @@ pub enum Kind {
 
     // Knowledge graph
     Reference,
+
+    // CSV import
+    CsvDataset,
+    CsvTable,
+    CsvColumn,
 }
 
 impl Kind {
@@ -248,6 +253,10 @@ impl Kind {
             Kind::Suggestion => "suggestion",
             // Knowledge graph
             Kind::Reference => "reference",
+            // CSV import
+            Kind::CsvDataset => "csv_dataset",
+            Kind::CsvTable => "csv_table",
+            Kind::CsvColumn => "csv_column",
         }
     }
 
@@ -281,6 +290,7 @@ impl Kind {
         Kind::ItemOther, Kind::ImplItemOther, Kind::TraitItemOther,
         Kind::Suggestion,
         Kind::Reference,
+        Kind::CsvDataset, Kind::CsvTable, Kind::CsvColumn,
     ];
 }
 
@@ -394,6 +404,9 @@ impl std::str::FromStr for Kind {
             "trait_item_other" => Ok(Kind::TraitItemOther),
             "suggestion" => Ok(Kind::Suggestion),
             "reference" => Ok(Kind::Reference),
+            "csv_dataset" => Ok(Kind::CsvDataset),
+            "csv_table" => Ok(Kind::CsvTable),
+            "csv_column" => Ok(Kind::CsvColumn),
             other => Err(format!("unknown kind: {}", other)),
         }
     }

@@ -80,6 +80,11 @@ pub enum Command {
     Tree {
         path: Option<String>,
     },
+    ImportCsv {
+        path: String,
+        schema: String,
+        project: String,
+    },
     AgentAdd {
         name: String,
         kind: String,
@@ -357,6 +362,11 @@ pub fn run(
         } => find::run(&mut client, &pattern, kind.as_deref(), limit, format),
         Command::Refs { symbol } => refs::run(&mut client, &symbol, format),
         Command::Tree { path } => tree::run(&mut client, path.as_deref(), format),
+        Command::ImportCsv {
+            path,
+            schema,
+            project,
+        } => import::run_csv(&mut client, &path, &schema, &project, format),
         Command::AgentAdd { name, kind, model } => {
             agent::add(&mut client, &name, &kind, model.as_deref(), format)
         }

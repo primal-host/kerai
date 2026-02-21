@@ -223,6 +223,20 @@ enum PostgresAction {
         /// ltree path pattern (subtree or lquery with wildcards)
         path: Option<String>,
     },
+
+    /// Import CSV files into typed Postgres tables with kerai nodes
+    ImportCsv {
+        /// Path to CSV file or directory
+        path: String,
+
+        /// Target Postgres schema (e.g. kaggle)
+        #[arg(long)]
+        schema: String,
+
+        /// Project name (e.g. march-machine-learning-mania-2026)
+        #[arg(long)]
+        project: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1220,6 +1234,15 @@ fn main() {
             },
             PostgresAction::Refs { symbol } => commands::Command::Refs { symbol },
             PostgresAction::Tree { path } => commands::Command::Tree { path },
+            PostgresAction::ImportCsv {
+                path,
+                schema,
+                project,
+            } => commands::Command::ImportCsv {
+                path,
+                schema,
+                project,
+            },
         },
         CliCommand::Sync { action } => match action {
             SyncAction::Run { peer } => commands::Command::Sync { peer },
